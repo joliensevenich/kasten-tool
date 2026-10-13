@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS = {
   deuvelDiepteVlak: 12,
   deuvelDiepteKant: 24,
   schroeven: true,
-  schroefDia: 5,
+  schroefDia: 4,
   clamexMarge: 64,
   clamexMaxAfstand: 256,
   clamexToegangDia: 6,
@@ -271,7 +271,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   }
 
   /** Verbinding van een liggend paneel met beide zijwanden: Clamex aan een zichtzijde, anders deuvels en schroeven. */
-  const join = (hp, yCenter) => {
+  /** Verbinding; bij een regel altijd twee deuvels (gemeten vanaf de achterkant van de regel) en één schroefgat ertussen. */
+  const join = (hp, yCenter, regel = false) => {
     for (const s of sides) {
       const edge = s.left ? 'u0' : 'u1';
       const sv = sideV(yCenter);
@@ -284,7 +285,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           count('Lamello Clamex P-14');
         }
       } else {
-        const dowels = dowelPositions(hp.vLen, S);
+        const dowels = regel
+          ? (hp.vLen > 2 * S.deuvelMarge + 10 ? [S.deuvelMarge, hp.vLen - S.deuvelMarge] : [hp.vLen / 4, hp.vLen * 3 / 4])
+          : dowelPositions(hp.vLen, S);
         for (const pos of dowels) {
           const su = sideU(hp.box.z + pos);
           s.ops.push({ kind: 'boring', face: 'binnen', u: su, v: sv, dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
@@ -309,7 +312,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       box: { x: t, y: o.y, z: o.z, w: W - 2 * t, h: t, d: o.d },
       uLen: W - 2 * t, vLen: o.d, ...o.extra, naam: o.naam,
     });
-    join(p, o.y + t / 2);
+    join(p, o.y + t / 2, !!o.regel);
     return p;
   };
 
@@ -348,25 +351,32 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     return z;
   });
 
+  // Rug in een groef: de bodem en de top/regels staan vóór de rug (smaller, zonder groef) en de rug wordt erin geschroefd.
+  // Uitzondering: bij een hangkast zit de rug onderaan in een groef in de bodem.
+  const hangkast = PRESETS.find(x => x.id === k.type)?.groep === 'Bovenkasten';
+  const rugInBodemGroef = groef && hangkast;
+  const voorRug = groef ? rugFront : zBack;          // achterkant van bodem/top als ze vóór de rug staan
+
   // Bodem (bij verluchting dubbel: een tweede bodem erboven, naar achter geschoven)
   if (hasBodem) {
-    const bodem = horizontal({ naam: 'Bodem', y: 0, z: zBack, d: Dk, extra: { id: 'bodem' } });
-    rugGroove(bodem, 'boven');
+    const bodem = rugInBodemGroef
+      ? horizontal({ naam: 'Bodem', y: 0, z: zBack, d: Dk, extra: { id: 'bodem' } })
+      : horizontal({ naam: 'Bodem', y: 0, z: voorRug, d: D - voorRug, extra: { id: 'bodem' } });
+    if (rugInBodemGroef) rugGroove(bodem, 'boven');
     if (verlOnder) horizontal({ naam: 'Bodem verluchting, achteruit', y: t + S.verluchtingSpleet, z: rugFront, d: D - rugFront - S.verluchtingInsprong, extra: { id: 'bodem-verluchting' } });
   }
 
   // Top of regels (bij verluchting altijd regels, met een tweede regel eronder, naar achter geschoven)
   const rb = S.regelBreedte;
   if (k.top === 'vol' && !verl) {
-    const top = horizontal({ naam: 'Top', y: H - t, z: zBack, d: Dk, extra: { id: 'top' } });
-    rugGroove(top, 'onder');
+    horizontal({ naam: 'Top', y: H - t, z: voorRug, d: D - voorRug, extra: { id: 'top' } });
   } else {
     // Bij een greeplijst schuift de voorregel naar achter, achter de greeplijst.
     const zFront = D - rb - (greeplijst ? S.greeplijstBinnenDiepte + t : 0);
-    horizontal({ naam: 'Voorregel', y: H - t, z: zFront, d: rb, extra: { id: 'regel-v' } });
-    const back = horizontal({ naam: 'Achterregel', y: H - t, z: zBack, d: Math.max(rb, rugFront - zBack + 20), band: 0, extra: { id: 'regel-a' } });
-    rugGroove(back, 'onder');
-    if (verl) horizontal({ naam: 'Regel verluchting, achteruit', y: H - 2 * t - S.verluchtingSpleet, z: zFront - S.verluchtingInsprong, d: rb, band: 0, extra: { id: 'regel-verluchting' } });
+    horizontal({ naam: 'Voorregel', y: H - t, z: zFront, d: rb, regel: true, extra: { id: 'regel-v' } });
+    // De achterregel staat vóór de rug; de rug loopt tot boven en wordt op de regel geschroefd.
+    horizontal({ naam: 'Achterregel', y: H - t, z: rugFront, d: rb, band: 0, regel: true, extra: { id: 'regel-a' } });
+    if (verl) horizontal({ naam: 'Regel verluchting, achteruit', y: H - 2 * t - S.verluchtingSpleet, z: zFront - S.verluchtingInsprong, d: rb, band: 0, regel: true, extra: { id: 'regel-verluchting' } });
   }
 
   // Panelen tussen de zones; per grens het bezette stuk [laag, hoog].
@@ -398,14 +408,24 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   if (groef) {
     segments.forEach(([a, b], idx) => {
       // Onderaan en bovenaan in de groef; bij een toestel loopt de rug achter de tussenbodem door.
-      const yb = a === 0 ? (hasBodem ? t - (gd - gs) : 0) : bounds[a].lo;
-      const yt = b === last ? H - t + (gd - gs) : bounds[b + 1].hi;
+      // Onderaan: in de groef van de bodem (hangkast) of tot onder (geschroefd in de bodem); bovenaan altijd tot boven.
+      const yb = a === 0 ? (hasBodem && rugInBodemGroef ? t - (gd - gs) : 0) : bounds[a].lo;
+      const yt = b === last ? H : bounds[b + 1].hi;
       const label = segName(segments.length, idx);
-      add({
+      const rugPart = add({
         id: segments.length === 1 ? 'rug' : undefined, naam: label ? `Rugwand ${label}` : 'Rugwand', rol: 'rug', mat: 'rug', dikte: S.rug, grain: 'v',
         box: { x: t - (gd - gs), y: yb, z: zBack + S.rugInsprong + (gw - S.rug) / 2, w: W - 2 * t + 2 * (gd - gs), h: yt - yb, d: S.rug },
         uLen: W - 2 * t + 2 * (gd - gs), vLen: yt - yb,
       });
+      // Schroeven door de rug: bovenaan in de top of achterregel, onderaan in de bodem (niet bij een hangkast).
+      const screwRow = vv => {
+        for (const u of spreadPositions(W - 2 * t, S.rugSchroefAfstand, 50)) {
+          rugPart.ops.push({ kind: 'boring', face: 'achter', u: t + u - rugPart.box.x, v: vv, dia: S.schroefDia, diepte: S.rug, doorgaand: true, naam: 'Schroef' });
+          count('Schroef');
+        }
+      };
+      if (b === last) screwRow(H - t / 2 - yb);
+      if (a === 0 && hasBodem && !rugInBodemGroef) screwRow(t / 2 - yb);
     });
   } else if (k.rug === 'opgeschroefd') {
     segments.forEach(([a, b], idx) => {
@@ -558,7 +578,18 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           // Scharnieren gelijk verdeeld, maar altijd binnen het korpus (ook als de deur uitsteekt).
           const pMin = Math.max(S.scharnierRand, -Pv + S.scharnierRand - door.box.y);
           const pMax = Math.min(door.vLen - S.scharnierRand, H - S.scharnierRand - door.box.y);
-          const positions = Array.from({ length: hc }, (_, j) => pMin + j * (pMax - pMin) / (hc - 1));
+          let positions = Array.from({ length: hc }, (_, j) => pMin + j * (pMax - pMin) / (hc - 1));
+          // Met een rijboring in dit vak: het scharnier zo verschuiven dat de gaten van het plaatje op het raster
+          // van 32 mm vallen (dezelfde gaten als de rijboring, geen overlappende gaten).
+          if ((Number(s.legplanken) || 0) > 0 && S.systeemboringen) {
+            const g0 = z.open0 + S.systeemMarge + S.montageplaatTussen / 2;
+            positions = positions.map(pv => {
+              const c = door.box.y + pv;
+              const snapped = g0 + Math.round((c - g0) / S.systeemRaster) * S.systeemRaster;
+              const np = snapped - door.box.y;
+              return np >= S.potRand + S.potDia / 2 && np <= door.vLen - S.potRand - S.potDia / 2 ? np : pv;
+            });
+          }
           const hingeSide = hingeLeft ? sideL : sideR;
           for (const pv of positions) {
             const cu = hingeLeft ? S.potRand + S.potDia / 2 : door.uLen - S.potRand - S.potDia / 2;
@@ -571,7 +602,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
             const atSide = hingeLeft ? Math.abs(dx0 - frontX0) < 1 : Math.abs(dx0 + dw - frontX1) < 1;
             if (atSide) {
               const u0 = Dk - S.montageplaatVoor;
-              for (const u of [u0, u0 - S.montageplaatTussen]) hingeSide.ops.push({ kind: 'boring', face: 'binnen', u, v: sideV(door.box.y + pv), dia: S.montageplaatDia, diepte: S.montageplaatDiepte, naam: 'Montageplaat' });
+              // Twee gaten boven elkaar (evenwijdig met de rijboring van de legplankdragers), 32 mm uit elkaar, gecentreerd op het scharnier.
+              for (const dv of [-S.montageplaatTussen / 2, S.montageplaatTussen / 2]) hingeSide.ops.push({ kind: 'boring', face: 'binnen', u: u0, v: sideV(door.box.y + pv) + dv, dia: S.montageplaatDia, diepte: S.montageplaatDiepte, naam: 'Montageplaat' });
             } else if (pv === positions[0]) {
               warnings.push('Een deur scharniert niet tegen een zijwand (bijvoorbeeld naast een blindpaneel): voorzie de montageplaten apart.');
             }
@@ -687,6 +719,16 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     p.uLen = r1(p.uLen);
     p.vLen = r1(p.vLen);
     for (const op of p.ops) for (const key of ['u', 'v', 'u1', 'u2', 'v1', 'v2', 'pos', 'w', 'h']) if (op[key] != null) op[key] = r1(op[key]);
+    // Dezelfde boring twee keer (bv. montageplaatje op een gat van de rijboring): één keer boren.
+    const seen = new Map();
+    p.ops = p.ops.filter(op => {
+      if (op.kind !== 'boring' || op.edge) return true;
+      const key = `${op.face}|${op.u}|${op.v}|${op.dia}`;
+      const prev = seen.get(key);
+      if (prev) { if (prev.naam !== op.naam && !prev.naam.includes(op.naam)) prev.naam = `${prev.naam} + ${op.naam}`; prev.diepte = Math.max(prev.diepte, op.diepte); return false; }
+      seen.set(key, op);
+      return true;
+    });
   }
   if (Object.keys(hw).some(n => n.startsWith('Ladegeleider')) || parts.some(p => p.naam.startsWith('Lade'))) {
     warnings.push('Lades: de maten van bodem en rug en de boringen van de geleiders komen uit een instelbare tabel (Instellingen › Blum). Controleer ze met de montagehandleiding van Blum.');

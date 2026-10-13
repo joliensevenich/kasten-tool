@@ -108,6 +108,10 @@ function mergeSettings(saved) {
   delete out.grepen; delete out.greepMerken;
   // Oude standaard (deuvels om de 50,5 mm) vervangen door de nieuwe (30 mm van de randen, ongeveer 80 mm ertussen).
   if (saved.deuvelAfstand === 50.5) { out.deuvelAfstand = 80; out.deuvelMarge = 30; }
+  // Schroefgaten zijn 4 mm (oude standaard was 5).
+  if (saved.schroefDia === 5) out.schroefDia = 4;
+  // Rijboring legplankdragers: 5 mm, zoals de montageplaatjes.
+  if (!saved.migratie5mm) { out.systeemDia = 5; out.montageplaatDia = 5; out.migratie5mm = true; }
   for (const serie of Object.keys(base.blum)) {
     out.blum[serie] = { ...base.blum[serie], ...(saved.blum?.[serie] ?? {}) };
     if (!Array.isArray(out.blum[serie].types) || !out.blum[serie].types.length) out.blum[serie].types = base.blum[serie].types;
