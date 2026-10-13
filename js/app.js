@@ -909,8 +909,10 @@ function sheetSVG(sh, N, color, list) {
 
 async function exportMpr(project) {
   if (!project.kasten.length) { alertBox('Geen kasten', 'Voeg eerst kasten toe aan het project.'); return; }
-  const { blob, count, notes } = projectMprZip(project, S(), S().mpr);
+  const { blob, count, notes } = projectMprZip(project, S(), { ...S().mpr, tools: S().tools });
   const warnings = [];
+  const checks = notes.filter(n => /geen |te kort/.test(n));
+  if (checks.length) warnings.push(`${checks.length} ${checks.length === 1 ? 'onderdeel heeft' : 'onderdelen hebben'} een boring waarvoor geen passend gereedschap in de gereedschapslijst staat (zie LEESMIJ.txt).`);
   if (S().mpr.groefMethode === 'zaag' && !S().mpr.groefTool) warnings.push('Het gereedschap voor de rugwandgroef is niet ingevuld (Instellingen › Machine); woodWOP kiest dan zelf of vraagt erom.');
   const msg = [`${count} programma's.`, ...warnings, ...(notes.length ? [`Nog manueel: ${notes.length} punten, zie LEESMIJ.txt in het zipbestand.`] : []),
     'Controleer elk programma eerst in de simulatie van woodWOP.'].join('\n\n');
@@ -919,7 +921,7 @@ async function exportMpr(project) {
 }
 
 function openMprText(k, p) {
-  const { files, skipped, frame } = mprForPart(p, S().mpr, safeName(`${k.code}_${p.id}`));
+  const { files, skipped, frame } = mprForPart(p, { ...S().mpr, tools: S().tools }, safeName(`${k.code}_${p.id}`));
   const body = el(`<div class="content">
     <div class="notice">${icon('ruler')}<span>Ligging op de machine: ${mm(frame.L)} × ${mm(frame.B)} mm (X × Y), zijde "${esc(frame.up)}" naar boven, nulpunt linksvoor.${skipped.length ? ` Niet in het bestand: ${[...new Set(skipped)].join(', ')}.` : ''}</span></div>
     ${files.map(f => `<div class="group"><div class="group-header"><span>${esc(f.name)}</span></div><pre class="code">${esc(f.text)}</pre></div>`).join('')}
@@ -974,6 +976,36 @@ const SETTING_GROUPS = [
 ];
 
 const SettingsView = {
+  renderTools() {
+    const box = $('#st-tools');
+    const s = S();
+    const kinds = [['boorV', 'Verticaal boorblok'], ['boorH', 'Horizontale boren'], ['boorL', 'Lange boren'], ['frees', 'Frezen'], ['zaag', 'Zagen']];
+    box.innerHTML = '';
+    $('#tl-count').textContent = `${s.tools.length} stuks`;
+    for (const [kind, title] of kinds) {
+      const list = s.tools.filter(t => t.soort === kind);
+      if (!list.length) continue;
+      box.appendChild(el(`<div class="row sub-head"><span class="row-sub"><b>${title}</b></span></div>`));
+      for (const t of list) {
+        const r = el(`<button class="row link" type="button"><span class="kast-code">${esc(t.nr)}</span><span class="row-main"><span>${esc(t.naam)}</span>
+          <span class="row-sub">Ø${mm(t.dia)} · ${mm(t.lengte)} mm${t.richting ? ` · ${t.richting}` : ''}</span></span></button>`);
+        r.addEventListener('click', async () => {
+          const res = await alertBox(`Gereedschap ${t.nr}`, 'Diameter en bruikbare lengte in mm, bijvoorbeeld "8 30".',
+            [{ label: 'Verwijder', role: 'destructive', value: 'del' }, { label: 'Annuleer', role: 'cancel', value: 'no' }, { label: 'Bewaar', value: 'ok' }],
+            { input: { value: `${t.dia} ${t.lengte}` } });
+          if (res.value === 'del') s.tools = s.tools.filter(x => x !== t);
+          else if (res.value === 'ok') { const [d, l] = res.text.replace(/,/g, '.').split(/\s+/).map(Number); if (d > 0) t.dia = d; if (l > 0) t.lengte = l; }
+          else return;
+          Store.save(); this.renderTools();
+        });
+        box.appendChild(r);
+      }
+    }
+    const reset = el(`<button class="row button" type="button">Lijst van de P110 terugzetten</button>`);
+    reset.addEventListener('click', () => { s.tools = JSON.parse(JSON.stringify(P110_TOOLS)); Store.save(); this.renderTools(); });
+    box.appendChild(reset);
+  },
+
   renderGrepen() {
     const box = $('#st-grepen');
     const s = S();
@@ -1062,7 +1094,9 @@ const SettingsView = {
           ${row('Boren tot diepte', selectHTML('mp-boorModusBlind', [['LS', 'LS (langzaam-snel)'], ['SS', 'SS (snel-snel)']], s.mpr.boorModusBlind))}
           ${row('Doorgaand boren', selectHTML('mp-boorModusDoor', [['LSL', 'LSL (langzaam-snel-langzaam)'], ['SSS', 'SSS (snel)']], s.mpr.boorModusDoor))}
           ${row('Extra diepte doorgaand', numHTML('mp-doorExtra', s.mpr.doorExtra))}
-        </div><div class="group-footer">Gereedschapsnummers zoals in woodWOP. Frees 130 en 101 komen uit jullie programma GERY. Boringen kiest woodWOP zelf op diameter.</div></div>
+        </div><div class="group-footer">Gereedschapsnummers zoals in het gereedschapsbeheer van de P110. Boringen kiest woodWOP zelf op diameter; de app controleert of er een boor met die diameter en lengte is.</div></div>
+        <div class="group"><div class="group-header"><span>Gereedschap P110</span><span id="tl-count"></span></div><div class="group-body" id="st-tools"></div>
+          <div class="group-footer">Overgenomen van de foto's van het gereedschapsbeheer. Diameter = 2 × radius (G1), lengte = bruikbare lengte (G3.1). Tik op een regel om aan te passen.</div></div>
         <div class="group"><div class="group-header">Opties</div><div class="group-body">
           <div class="row"><span class="row-label">Schroeven tussen de deuvels</span>${toggleHTML('st-schroeven', s.schroeven)}</div>
           <div class="row"><span class="row-label">Deuvelgaten bij de scharnierpot</span>${toggleHTML('st-potDeuvels', s.potDeuvels)}</div>
@@ -1090,6 +1124,7 @@ const SettingsView = {
     for (const key of ['schroeven', 'potDeuvels', 'systeemboringen']) $(`#st-${key}`, v).addEventListener('change', e => { s[key] = e.target.checked; Store.save(); });
     this.renderDecors();
     this.renderGrepen();
+    this.renderTools();
     $('#st-frontMateriaal', v).addEventListener('change', e => { s.frontMateriaal = e.target.value; Store.save(); });
     for (const key of ['decorKorpus', 'decorFront']) bindDecor($(`#st-${key}`, v), val => { s[key] = val; Store.save(); this.render(); });
     for (const key of Object.keys(NEST_DEFAULTS)) $(`#nz-${key}`, v).addEventListener('change', e => { if (e.target.value !== '') { s.nest[key] = Number(e.target.value); Store.save(); } });

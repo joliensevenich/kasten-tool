@@ -1,6 +1,6 @@
 // Bewaart de app op het toestel, zodat hij ook zonder internet werkt.
 // Verhoog VERSION bij elke nieuwe versie.
-const VERSION = 'kasten-v12';
+const VERSION = 'kasten-v13';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'logo.png',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',

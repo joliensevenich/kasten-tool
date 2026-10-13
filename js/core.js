@@ -95,10 +95,15 @@ const Store = {
 
 /** Nieuwe instellingen (uit een nieuwere versie) krijgen hun standaardwaarde. */
 function mergeSettings(saved) {
-  const base = { ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), mpr: { ...MPR_DEFAULTS }, nest: { ...NEST_DEFAULTS } };
+  const base = { ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), mpr: { ...MPR_DEFAULTS }, nest: { ...NEST_DEFAULTS }, tools: JSON.parse(JSON.stringify(P110_TOOLS)) };
   if (!saved) return base;
-  const out = { ...base, ...saved, blum: { ...base.blum }, mpr: { ...MPR_DEFAULTS, ...(saved.mpr ?? {}) }, nest: { ...NEST_DEFAULTS, ...(saved.nest ?? {}) },
+  const savedMpr = { ...(saved.mpr ?? {}) };
+  // Oude standaard (frees 101, geen zaag) vervangen door het echte gereedschap van de P110.
+  if (savedMpr.freesKlein === '101') savedMpr.freesKlein = MPR_DEFAULTS.freesKlein;
+  if (!savedMpr.groefTool) savedMpr.groefTool = MPR_DEFAULTS.groefTool;
+  const out = { ...base, ...saved, blum: { ...base.blum }, mpr: { ...MPR_DEFAULTS, ...savedMpr }, nest: { ...NEST_DEFAULTS, ...(saved.nest ?? {}) },
     decors: Array.isArray(saved.decors) && saved.decors.length ? saved.decors : base.decors,
+    tools: Array.isArray(saved.tools) && saved.tools.length ? saved.tools : base.tools,
     grepen: Array.isArray(saved.grepen) ? saved.grepen : [], greepMerken: Array.isArray(saved.greepMerken) && saved.greepMerken.length ? saved.greepMerken : base.greepMerken };
   // Oude standaard (deuvels om de 50,5 mm) vervangen door de nieuwe (30 mm van de randen, ongeveer 80 mm ertussen).
   if (saved.deuvelAfstand === 50.5) { out.deuvelAfstand = 80; out.deuvelMarge = 30; }

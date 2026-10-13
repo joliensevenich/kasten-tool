@@ -7,14 +7,77 @@
 // Zijde A is de zijde met de meeste bewerkingen (binnenkant van een zijwand of deur, bovenkant van een bodem).
 
 const MPR_DEFAULTS = {
-  freesKlein: '101',        // kamers en uitsparingen
-  freesContour: '130',
+  freesKlein: '156',        // Ø8: led-groeven en kleine kamers
+  freesContour: '130',      // wisselmesfrees Ø18: uitsparingen
   groefMethode: 'zaag',     // 'zaag' (Nuten) of 'frees' (Tasche)
-  groefTool: '',            // leeg: woodWOP kiest zelf
+  groefTool: '1300',        // sponningzaag
   boorModusBlind: 'LS',     // langzaam-snel tot diepte
   boorModusDoor: 'LSL',     // langzaam-snel-langzaam doorgaand
   doorExtra: 0,             // extra diepte bij doorgaand boren
 };
+
+// Gereedschap van de HOMAG P110 (gereedschapsbeheer, foto's van 13-10-2026).
+// soort: frees, boorV (verticaal boorblok), boorH (horizontaal, met richting), boorL (lange doorgaande boor), zaag.
+// dia = werkelijke diameter (2 × radius G1), lengte = bruikbare lengte (G3.1).
+const P110_TOOLS = [
+  { nr: '130', naam: 'Wisselmesfrees Ø18 rechts', soort: 'frees', dia: 17.94, lengte: 50 },
+  { nr: '131', naam: 'Frees Ø20 rechts', soort: 'frees', dia: 19, lengte: 75 },
+  { nr: '132', naam: 'Frees Ø13 rechts', soort: 'frees', dia: 13, lengte: 44 },
+  { nr: '133', naam: 'Frees Ø13 rechts, negatief snijvlak', soort: 'frees', dia: 11.55, lengte: 44 },
+  { nr: '139', naam: 'Frees Ø6 rechts', soort: 'frees', dia: 4.34, lengte: 21 },
+  { nr: '150', naam: 'Wisselmesfrees Ø18 links', soort: 'frees', dia: 17.94, lengte: 50 },
+  { nr: '152', naam: 'Diamantfrees Ø25 rechts', soort: 'frees', dia: 25, lengte: 50 },
+  { nr: '154', naam: 'Krukfrees', soort: 'frees', dia: 15.2, lengte: 65 },
+  { nr: '155', naam: 'Frees Ø3 rechts', soort: 'frees', dia: 4.03, lengte: 12 },
+  { nr: '156', naam: 'Frees Ø8 rechts', soort: 'frees', dia: 7.71, lengte: 31 },
+  { nr: '157', naam: 'Slotkastfrees Ø16', soort: 'frees', dia: 17.65, lengte: 95 },
+  { nr: '158', naam: 'Doorgaande boor Ø8', soort: 'boorL', dia: 8, lengte: 65 },
+  { nr: '159', naam: 'Doorgaande boor Ø12', soort: 'boorL', dia: 12, lengte: 120 },
+  { nr: '160', naam: 'Doorgaande boor Ø10', soort: 'boorL', dia: 10, lengte: 85 },
+  { nr: '180', naam: 'Hoekfrees 60°', soort: 'frees', dia: 0.2, lengte: 30 },
+  { nr: '181', naam: 'Hoekfrees 45°', soort: 'frees', dia: 0.2, lengte: 30 },
+  { nr: '200', naam: 'Trespafrees Ø18 rechts', soort: 'frees', dia: 19.7, lengte: 22 },
+  { nr: '201', naam: 'Clamex-zaag Ø100,4', soort: 'zaag', dia: 100.4, lengte: 30 },
+  { nr: '202', naam: 'Clamex-frees', soort: 'frees', dia: 9, lengte: 20 },
+  { nr: '203', naam: 'Lamello-zaag Ø100', soort: 'zaag', dia: 100, lengte: 3.9 },
+  { nr: '230', naam: 'Afrondfrees', soort: 'frees', dia: 40.3, lengte: 30 },
+  { nr: '300', naam: 'Zaagblad Ø300', soort: 'zaag', dia: 300, lengte: 3.4 },
+  { nr: '305', naam: 'Vlakfrees', soort: 'frees', dia: 120, lengte: 20 },
+  { nr: '1300', naam: 'Sponningzaag 5 mm', soort: 'zaag', dia: 120, lengte: 25 },
+  { nr: '1001', naam: 'Verticale boor Ø8', soort: 'boorV', dia: 8, lengte: 30 },
+  { nr: '1002', naam: 'Verticale boor Ø4', soort: 'boorV', dia: 4, lengte: 30 },
+  { nr: '1003', naam: 'Verticale boor Ø10', soort: 'boorV', dia: 10, lengte: 30 },
+  { nr: '1004', naam: 'Verticale boor Ø8', soort: 'boorV', dia: 8, lengte: 30 },
+  { nr: '1005', naam: 'Verticale boor Ø8', soort: 'boorV', dia: 8, lengte: 30 },
+  { nr: '1006', naam: 'Verticale boor Ø35', soort: 'boorV', dia: 35, lengte: 15 },
+  ...['1007', '1008', '1009', '1010', '1011', '1012'].map(nr => ({ nr, naam: 'Verticale boor Ø5', soort: 'boorV', dia: 5, lengte: 30 })),
+  { nr: '1111', naam: 'Horizontale boor Ø8 X+', soort: 'boorH', dia: 8, lengte: 40, richting: 'XP' },
+  { nr: '1113', naam: 'Horizontale boor Ø8 X+', soort: 'boorH', dia: 8, lengte: 40, richting: 'XP' },
+  { nr: '1112', naam: 'Horizontale boor Ø8 X−', soort: 'boorH', dia: 8, lengte: 40, richting: 'XM' },
+  { nr: '1114', naam: 'Horizontale boor Ø8 X−', soort: 'boorH', dia: 8, lengte: 40, richting: 'XM' },
+  { nr: '1161', naam: 'Horizontale boor Ø8 Y−', soort: 'boorH', dia: 8, lengte: 40, richting: 'YM' },
+  { nr: '1162', naam: 'Horizontale boor Ø8 Y+', soort: 'boorH', dia: 8, lengte: 40, richting: 'YP' },
+];
+
+/** Controleert of een boring met het gereedschap van de machine kan; geeft een omschrijving van het probleem, of null. */
+function checkDrill(tools, { dia, diepte, horizontaal, richting, door }) {
+  const near = t => Math.abs(t.dia - dia) < 0.3;
+  if (horizontaal) {
+    const fit = tools.filter(t => t.soort === 'boorH' && near(t));
+    if (!fit.length) return `horizontale boring Ø${dia}: geen horizontale boor met die diameter`;
+    if (richting && !fit.some(t => t.richting === richting)) return `horizontale boring Ø${dia} in richting ${richting}: geen boor in die richting`;
+    if (Math.max(...fit.map(t => t.lengte)) < diepte) return `horizontale boring Ø${dia} × ${diepte}: boor te kort (${Math.max(...fit.map(t => t.lengte))} mm)`;
+    return null;
+  }
+  const fit = tools.filter(t => (t.soort === 'boorV' || t.soort === 'boorL') && near(t));
+  if (!fit.length) {
+    // Grotere gaten kunnen met een frees (rondfrezen).
+    if (tools.some(t => t.soort === 'frees' && t.dia < dia - 0.5)) return null;
+    return `boring Ø${dia}: geen boor met die diameter`;
+  }
+  if (Math.max(...fit.map(t => t.lengte)) < diepte - 0.01) return `boring Ø${dia} × ${diepte}: boor te kort (${Math.max(...fit.map(t => t.lengte))} mm)`;
+  return null;
+}
 
 const f3 = n => String(Math.round(Number(n) * 1000) / 1000);
 
@@ -80,11 +143,15 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       const pt = op.edge === 'u0' ? [0, op.pos] : op.edge === 'u1' ? [p.uLen, op.pos] : op.edge === 'v0' ? [op.pos, 0] : [op.pos, p.vLen];
       const [x, y] = fr.map(pt[0], pt[1]);
       const dir = Math.abs(x) < 0.01 ? 'XP' : Math.abs(x - fr.L) < 0.01 ? 'XM' : Math.abs(y) < 0.01 ? 'YP' : 'YM';
+      const prob = checkDrill(M.tools ?? P110_TOOLS, { dia: op.dia, diepte: op.diepte, horizontaal: true, richting: dir });
+      if (prob) skipped.push(`Let op: ${prob}`);
       out.push(block('<103 \\BohrHoriz\\', { XA: f3(x), YA: f3(y), ZA: f3(D / 2), BM: dir, TI: f3(op.diepte), DU: f3(op.dia), AN: '1', MI: '0', AB: '32', KO: '00' }));
       continue;
     }
     if (op.kind === 'boring') {
       const [x, y] = map(op.u, op.v);
+      const prob = checkDrill(M.tools ?? P110_TOOLS, { dia: op.dia, diepte: through ? D + Number(M.doorExtra || 0) : op.diepte, door: through });
+      if (prob) skipped.push(`Let op: ${prob}`);
       out.push(block('<102 \\BohrVert\\', {
         XA: f3(x), YA: f3(y), BM: through ? M.boorModusDoor : M.boorModusBlind,
         TI: f3(through ? D + Number(M.doorExtra || 0) : op.diepte), DU: f3(op.dia), AN: '1', MI: '0', AB: '32', WI: '0', S_: '2', KO: '00',
@@ -143,7 +210,10 @@ function projectMprZip(project, S, M) {
       if (skipped.length) {
         const n = {};
         for (const s of skipped) n[s] = (n[s] ?? 0) + 1;
-        notes.push(`${k.code} ${p.naam}: ${Object.entries(n).map(([s, c]) => `${c}× ${s}`).join(', ')} niet in het MPR-bestand (manueel toevoegen).`);
+        const missing = Object.entries(n).filter(([s]) => !s.startsWith('Let op'));
+        const checks = Object.entries(n).filter(([s]) => s.startsWith('Let op'));
+        if (missing.length) notes.push(`${k.code} ${p.naam}: ${missing.map(([s, c]) => `${c}× ${s}`).join(', ')} niet in het MPR-bestand (manueel toevoegen).`);
+        if (checks.length) notes.push(`${k.code} ${p.naam}: ${checks.map(([s, c]) => `${c}× ${s.replace('Let op: ', '')}`).join(', ')}.`);
       }
     }
   }
