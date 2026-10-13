@@ -25,7 +25,7 @@ function showTab(i) {
   $$('.tab').forEach((b, j) => b.classList.toggle('active', i === j));
   $$('.view').forEach((v, j) => v.classList.toggle('active', i === j));
   if (i === 0) Projects.render();
-  if (i === 1) SettingsView.render();
+  if (i === 1) { SettingsView.cat = null; SettingsView.render(); }
 }
 
 // MARK: - Projecten
@@ -101,11 +101,16 @@ const Projects = {
           </div>
           <div class="split-side">
             <div class="group"><div class="group-header">Kasten</div><div class="group-body" id="pj-list"></div></div>
+            <div class="group"><div class="group-header">Opstelling</div><div class="group-body">
+              ${row('Bovenkasten: onderkant boven vloer', numHTML('pj-boven', p.bovenHoogte ?? '', '1400'))}
+            </div><div class="group-footer">Automatisch staan onder- en kolomkasten naast elkaar op de vloer, en bovenkasten in een eigen rij op deze hoogte. Per kast kun je "Plaatsing" op Vrij zetten, voor een hoek, een eiland of bovenkasten boven een bepaalde onderkast.</div></div>
             <div class="group"><div class="group-body">
               <button class="row button" type="button" id="pj-add"><span class="icon-label">${icon('plus')}Kast toevoegen</span></button>
               <button class="row button" type="button" id="pj-cut"><span class="icon-label">${icon('table')}Zaaglijst en beslag</span></button>
               <button class="row button" type="button" id="pj-plan"><span class="icon-label">${icon('explode')}Zaagplan (platen)</span></button>
               <button class="row button" type="button" id="pj-mpr"><span class="icon-label">${icon('download')}MPR-bestanden (woodWOP)</span></button>
+              <button class="row button" type="button" id="pj-csv"><span class="icon-label">${icon('table')}Zaaglijst CSV (Schelling HPO)</span></button>
+              <button class="row button" type="button" id="pj-import"><span class="icon-label">${icon('copy')}Kasten uit ander project toevoegen</span></button>
               <button class="row button" type="button" id="pj-share"><span class="icon-label">${icon('share')}Projectbestand delen</span></button>
             </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand, per kast een map.</div></div>
           </div>
@@ -124,8 +129,14 @@ const Projects = {
     }));
     $('#pj-cut', v).addEventListener('click', () => openCutList(p));
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));
+    $('#pj-csv', v).addEventListener('click', () => {
+      if (!p.kasten.length) { alertBox('Geen kasten', 'Voeg eerst kasten toe aan het project.'); return; }
+      shareFile(cutListCsv(p, cutRows(p).rows), `Zaaglijst ${safeName(p.naam)}.csv`);
+    });
     $('#pj-plan', v).addEventListener('click', () => openCutPlan(p));
     $('#pj-share', v).addEventListener('click', () => shareProject(p));
+    $('#pj-import', v).addEventListener('click', () => importCabinets(p, () => this.renderProject()));
+    $('#pj-boven', v).addEventListener('change', e => { p.bovenHoogte = e.target.value === '' ? null : Number(e.target.value); touch(p); this.renderProject(); });
 
     const list = $('#pj-list', v);
     if (!p.kasten.length) list.innerHTML = '<div class="row"><span class="row-sub">Nog geen kasten.</span></div>';
@@ -155,14 +166,16 @@ const Projects = {
     if (p.kasten.length) {
       this.viewer = makeViewer($('#pj-viewer', v), { onPick: hit => { if (hit) { const k = p.kasten.find(x => x.id === hit.cab); if (k) openCabinet(p, k, hit.part.id); } } });
       if (!this.viewer) return;
-      let x = 0;
+      const layout = projectLayout(p);
       const cabs = [];
-      for (const k of p.kasten) {
+      p.kasten.forEach((k, i) => {
         const res = buildCabinet(k, S());
-        if (res.error) continue;
-        cabs.push({ key: k.id, parts: res.parts, offsetX: x });
-        x += Number(k.breedte) + 2;
-      }
+        if (res.error) return;
+        const L = layout[i];
+        cabs.push({ key: k.id, parts: res.parts, offsetX: L.x, offsetY: L.y, offsetZ: L.z, rot: L.rot });
+      });
+      this.viewer.showFloor = true;
+      this.viewer.floorY = 0;
       this.viewer.show(cabs, { refit: true });
       bindViewerTools(v, this.viewer, 'pj');
     }
@@ -324,12 +337,21 @@ function openCabinet(project, k, selectId = null) {
         ${row('Houtstructuur fronten', selectHTML('f-houtDoorlopend', [['nee', 'Niet doorlopend'], ['kast', 'Doorlopend in deze kast'], ['vorige', 'Doorlopend met de vorige kast']], k.houtDoorlopend ?? 'nee'))}
         ${row('Plaattype fronten', selectHTML('f-frontMateriaal', [['', `Standaard (${S().frontMateriaal})`], ...PLAATTYPES.map(x => [x, x])], k.frontMateriaal ?? ''))}
         ${row('Openen', selectHTML('f-greep', OPTIONS.greep, k.greep))}
-        ${k.greep === 'greep' ? row('Greep', greepSelectHTML('f-greepId', k.greepId, [['', `Standaard (${S().greepHartafstand} mm)`]])) : ''}
+        ${k.greep === 'greep' ? row('Greep: hart-op-hart', numHTML('f-greepHart', k.greepHart, `${S().greepHartafstand} (standaard)`)) : ''}
         ${row('Deuren', selectHTML('f-deuren', OPTIONS.deuren, k.deuren))}
         ${row('Scharnieren (1 deur)', selectHTML('f-scharnierKant', OPTIONS.scharnierKant, k.scharnierKant))}
         ${row('Blindpaneel', numHTML('f-blindBreedte', k.blindBreedte || '', 'geen'))}
         ${Number(k.blindBreedte) > 0 ? row('Blindpaneel aan', selectHTML('f-blindKant', OPTIONS.blindKant, k.blindKant)) : ''}
       </div></div>
+
+      <div class="group"><div class="group-header">Plaatsing in het project</div><div class="group-body">
+        ${row('Plaatsing', selectHTML('f-plaatsing', [['auto', 'Automatisch (naast elkaar)'], ['vrij', 'Vrij']], k.plaatsing ?? 'auto'))}
+        ${k.plaatsing === 'vrij' ? (() => { const L = projectLayout(project)[project.kasten.indexOf(k)] ?? { auto: { x: 0, y: 0 } };
+          return row('Positie langs de wand (X)', numHTML('f-posX', k.posX, `${mm(L.auto.x)}`))
+            + row('Onderkant korpus boven vloer', numHTML('f-posY', k.posY, `${mm(L.auto.y)}`))
+            + row('Afstand van de wand', numHTML('f-posZ', k.posZ, '0'))
+            + row('Draaiing', selectHTML('f-rot', [['0', '0°'], ['90', '90° (rechtsom)'], ['180', '180°'], ['270', '270° (linksom)']], String(k.rot ?? 0))); })() : ''}
+      </div><div class="group-footer">Vrij: X is de linkerachterhoek van de kast, gemeten langs de wand; de kast draait rond die hoek. Een hoek maak je bijvoorbeeld met 90° op het einde van de rij.</div></div>
 
       <div class="group"><div class="group-header"><span>Indeling (van boven naar onder)</span></div><div id="f-secs"></div>
         <div class="group-body" style="margin-top:10px"><button class="row button" type="button" id="f-addsec"><span class="icon-label">${icon('plus')}Vak toevoegen</span></button></div>
@@ -342,14 +364,16 @@ function openCabinet(project, k, selectId = null) {
       if (!e) return;
       e.addEventListener(e.type === 'checkbox' ? 'change' : (e.tagName === 'SELECT' ? 'change' : 'input'), () => {
         k[key] = e.type === 'checkbox' ? e.checked : kind === 'num' ? (e.value === '' ? null : Number(e.value)) : e.value;
-        if (['blindBreedte', 'plint', 'rug', 'greep', 'front'].includes(key)) renderForm();
+        if (['blindBreedte', 'plint', 'rug', 'greep', 'front', 'plaatsing'].includes(key)) renderForm();
         update();
       });
     };
     bindVal('f-code', 'code');
     $('#f-code', form).addEventListener('change', () => sheet.setTitle(`${k.code} · ${PRESETS.find(x => x.id === k.type)?.naam ?? ''}`));
-    ['breedte', 'hoogte', 'diepte', 'plintHoogte', 'blindBreedte', 'plaatDikte', 'rugDikte', 'uitstekOnder', 'uitstekBoven'].forEach(key => bindVal('f-' + key, key, 'num'));
-    ['plint', 'top', 'rug', 'front', 'greep', 'deuren', 'scharnierKant', 'blindKant', 'greepId', 'frontMateriaal', 'houtDoorlopend'].forEach(key => bindVal('f-' + key, key));
+    ['breedte', 'hoogte', 'diepte', 'plintHoogte', 'blindBreedte', 'plaatDikte', 'rugDikte', 'uitstekOnder', 'uitstekBoven', 'greepHart'].forEach(key => bindVal('f-' + key, key, 'num'));
+    ['plint', 'top', 'rug', 'front', 'greep', 'deuren', 'scharnierKant', 'blindKant', 'frontMateriaal', 'houtDoorlopend', 'plaatsing'].forEach(key => bindVal('f-' + key, key));
+    ['posX', 'posY', 'posZ'].forEach(key => bindVal('f-' + key, key, 'num'));
+    $('#f-rot', form)?.addEventListener('change', e => { k.rot = Number(e.target.value); update(); });
     ['zichtL', 'zichtR', 'verluchting'].forEach(key => bindVal('f-' + key, key));
     for (const key of ['decorKorpus', 'decorFront', 'decorRug', 'bandKorpusDecor']) {
       const e = $('#f-' + key, form);
@@ -497,7 +521,9 @@ function openPart(k, partId, onChange) {
         <div class="row"><span class="row-label">Dikte</span><span class="row-value num">${p.dikte} mm</span></div>
         ${row('Decor', decorSelectHTML('p-decor', k.partDecor?.[p.id] ?? '', [['', `Standaard (${partBaseDecor(k, S(), p)})`]]))}
         ${row('Plaattype', selectHTML('p-type', [['', `Standaard (${partBaseType(k, S(), p)})`], ...PLAATTYPES.map(x => [x, x])], k.partType?.[p.id] ?? ''))}
-        ${p.rol === 'front' && k.greep === 'greep' && !/Blindpaneel/.test(p.naam) ? row('Greep', greepSelectHTML('p-greep', k.frontGreep?.[p.id] ?? '', [['', 'Zoals de kast'], ['geen', 'Geen greep']])) : ''}
+        ${p.rol === 'front' && k.greep === 'greep' && !/Blindpaneel/.test(p.naam) ? `<div class="row"><span class="row-label">Greep: hart-op-hart</span><div class="row-fill">
+          ${numHTML('p-greep', typeof k.frontGreep?.[p.id] === 'number' ? k.frontGreep[p.id] : '', k.greepHart ?? S().greepHartafstand)}</div></div>
+          <div class="row"><span class="row-label">Geen greep op deze front</span>${toggleHTML('p-geengreep', k.frontGreep?.[p.id] === 'geen')}</div>` : ''}
       </div><div class="group-footer">De zaagmaat is de eindmaat: de kantenband wordt bij het afplakken afgefreesd.</div></div>
       <div class="group"><div class="group-header">Kantenband</div><div class="group-body">
         ${['u0', 'u1', 'v0', 'v1'].map(e => `<div class="row edge-row"><span class="row-label">${names[e]}</span><div class="row-fill">
@@ -535,7 +561,13 @@ function openPart(k, partId, onChange) {
     });
     $('#p-greep', body)?.addEventListener('change', e => {
       k.frontGreep = k.frontGreep ?? {};
-      if (e.target.value) k.frontGreep[p.id] = e.target.value; else delete k.frontGreep[p.id];
+      if (e.target.value === '') delete k.frontGreep[p.id]; else k.frontGreep[p.id] = Number(e.target.value);
+      onChange?.();
+      render();
+    });
+    $('#p-geengreep', body)?.addEventListener('change', e => {
+      k.frontGreep = k.frontGreep ?? {};
+      if (e.target.checked) k.frontGreep[p.id] = 'geen'; else delete k.frontGreep[p.id];
       onChange?.();
       render();
     });
@@ -565,71 +597,6 @@ function openPart(k, partId, onChange) {
       });
     }
   }
-}
-
-// MARK: - Grepen
-
-const greepLabel = g => `${[g.merk, g.artikel].filter(Boolean).join(' ')}${g.naam ? ` · ${g.naam}` : ''} (${Number(g.hartafstand) ? `${g.hartafstand} mm` : 'knop'})`;
-function greepSelectHTML(id, value, first) {
-  const opts = [...first, ...S().grepen.map(g => [g.id, greepLabel(g)])];
-  return selectHTML(id, opts, value ?? '');
-}
-
-/** Formulier om een greep aan de catalogus toe te voegen of aan te passen. */
-function openGreepForm(greep, onSave) {
-  const g = greep ? { ...greep } : { id: uid(), merk: S().greepMerken[0] ?? '', artikel: '', naam: '', hartafstand: 160, dia: S().greepDia };
-  const body = el(`<div class="content"><div class="group"><div class="group-body">
-    ${row('Merk', selectHTML('g-merk', [...S().greepMerken.map(m => [m, m]), ['__nieuw', 'Ander merk…']], g.merk))}
-    <div class="row"><span class="row-label">Artikelnummer</span><div class="row-fill"><input class="input-plain" id="g-artikel" value="${esc(g.artikel)}" placeholder="zoals in de catalogus"></div></div>
-    <div class="row"><span class="row-label">Naam</span><div class="row-fill"><input class="input-plain" id="g-naam" value="${esc(g.naam)}" placeholder="bv. greep zwart mat"></div></div>
-    ${row('Hart-op-hart', numHTML('g-hartafstand', g.hartafstand, '0 = knop'))}
-    ${row('Boring Ø', numHTML('g-dia', g.dia))}
-  </div><div class="group-footer">Hart-op-hart 0 is een knop met één boring.</div></div></div>`);
-  const sheet = openSheet({ title: greep ? 'Greep aanpassen' : 'Nieuwe greep', left: { label: 'Annuleer' }, body,
-    right: { label: 'Bewaar', bold: true, onClick: () => { onSave(g); sheet.close(); } } });
-  const merk = $('#g-merk', body);
-  merk.addEventListener('change', async () => {
-    if (merk.value !== '__nieuw') { g.merk = merk.value; return; }
-    const r = await alertBox('Ander merk', '', [{ label: 'Annuleer', role: 'cancel', value: 'no' }, { label: 'Voeg toe', value: 'ok' }], { input: { placeholder: 'Merk' } });
-    if (r.value === 'ok' && r.text.trim()) {
-      g.merk = r.text.trim();
-      if (!S().greepMerken.includes(g.merk)) { S().greepMerken.push(g.merk); Store.save(); }
-      merk.insertAdjacentHTML('afterbegin', `<option value="${esc(g.merk)}">${esc(g.merk)}</option>`);
-    }
-    merk.value = g.merk;
-  });
-  $('#g-artikel', body).addEventListener('input', e => { g.artikel = e.target.value.trim(); });
-  $('#g-naam', body).addEventListener('input', e => { g.naam = e.target.value.trim(); });
-  $('#g-hartafstand', body).addEventListener('input', e => { g.hartafstand = Number(e.target.value) || 0; });
-  $('#g-dia', body).addEventListener('input', e => { g.dia = Number(e.target.value) || S().greepDia; });
-}
-
-/** Lijst plakken (uit Excel of een prijslijst): merk, artikelnummer, naam, hart-op-hart, Ø per regel. */
-function openGreepImport(onDone) {
-  const body = el(`<div class="content">
-    <div class="notice">${icon('table')}<span>Plak regels uit Excel of een prijslijst, één greep per regel, met kolommen:<br><b>merk · artikelnummer · naam · hart-op-hart · Ø</b> (Ø mag weg). Kolommen gescheiden door tab, ; of |.</span></div>
-    <textarea id="gi-text" class="paste" rows="10" placeholder="Häfele;123.45.678;Greep mat zwart;160;5"></textarea>
-    <div class="group-footer" id="gi-info"></div></div>`);
-  const sheet = openSheet({ title: 'Grepen plakken', left: { label: 'Annuleer' }, body,
-    right: { label: 'Voeg toe', bold: true, onClick: () => {
-      const list = parse();
-      for (const g of list) {
-        S().grepen.push(g);
-        if (g.merk && !S().greepMerken.includes(g.merk)) S().greepMerken.push(g.merk);
-      }
-      Store.save();
-      sheet.close();
-      onDone(list.length);
-    } } });
-  const parse = () => $('#gi-text', body).value.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
-    const c = l.split(/\t|;|\|/).map(x => x.trim());
-    const num = x => Number(String(x ?? '').replace(',', '.').replace(/[^0-9.]/g, ''));
-    return { id: uid(), merk: c[0] ?? '', artikel: c[1] ?? '', naam: c[2] ?? '', hartafstand: num(c[3]) || 0, dia: num(c[4]) || S().greepDia };
-  }).filter(g => g.artikel || g.naam);
-  $('#gi-text', body).addEventListener('input', () => {
-    const n = parse().length;
-    $('#gi-info', body).textContent = n ? `${n} ${n === 1 ? 'greep' : 'grepen'} herkend.` : '';
-  });
 }
 
 // MARK: - Led-verlichting
@@ -822,9 +789,38 @@ function openCutList(project) {
   </div>`);
   openSheet({
     title: `Zaaglijst ${project.naam}`, full: true, left: { label: 'Klaar', bold: true },
-    right: { icon: 'share', label: 'Excel', onClick: () => shareFile(cutListXlsx(project, rows, hardware, bands), `Zaaglijst ${safeName(project.naam)}.xlsx`) },
+    right: { icon: 'share', label: 'Exporteren', onClick: async () => {
+      const c = await actionSheet('Zaaglijst exporteren', '', [
+        { label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'CSV voor de zaag (HPO, Schelling)', value: 'csv' }]);
+      if (c === 'xlsx') shareFile(cutListXlsx(project, rows, hardware, bands), `Zaaglijst ${safeName(project.naam)}.xlsx`);
+      if (c === 'csv') shareFile(cutListCsv(project, rows), `Zaaglijst ${safeName(project.naam)}.csv`);
+    } },
     body,
   });
+}
+
+/**
+ * Zaaglijst als CSV voor de optimalisatiesoftware van de zaag (bv. HPO op een IMA Schelling).
+ * Eén rij per stuk, vaste kolommen; in HPO stel je één keer een importsjabloon in met deze kolomvolgorde.
+ * Scheidingsteken ; en decimaalpunt (instelbaar), UTF-8.
+ */
+const CSV_COLUMNS = ['Nr', 'Project', 'Kast', 'Onderdeel', 'Materiaal', 'Decor', 'Plaattype', 'Dikte', 'Lengte', 'Breedte', 'Aantal', 'Draaien', 'Band L1', 'Band L2', 'Band B1', 'Band B2'];
+function cutListCsv(project, rows) {
+  const N = S().nest;
+  const sep = N.csvScheiding || ';';
+  const dec = N.csvDecimaal || '.';
+  const num = n => String(Math.round(Number(n) * 10) / 10).replace('.', dec);
+  const cell = v => { const t = String(v ?? ''); return /[";\n,]/.test(t) || t.includes(sep) ? `"${t.replace(/"/g, '""')}"` : t; };
+  // Materiaalcode: decor, plaattype en dikte, zoals de zaag ze als plaatmateriaal kent (bv. W980_MEL_18).
+  const matCode = r => `${r.decor}_${(r.plaattype ?? 'Melamine') === 'HPL' ? 'HPL' : 'MEL'}_${num(r.dikte)}`;
+  const band = (r, e) => r[e] ? `${num(r[e])} ${r[e + 'd'] ?? ''}`.trim() : '';
+  const lines = [CSV_COLUMNS.map(cell).join(sep)];
+  rows.forEach((r, i) => {
+    const draaien = isWoodDecor(r.decor, S().decors) ? 0 : 1;   // houtdecor: nerf in de lengte, niet draaien
+    lines.push([i + 1, project.naam, r.kast, r.naam, matCode(r), r.decor, r.plaattype ?? 'Melamine', num(r.dikte), num(r.L), num(r.B), r.aantal, draaien,
+      band(r, 'L1'), band(r, 'L2'), band(r, 'B1'), band(r, 'B2')].map(cell).join(sep));
+  });
+  return new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv' });
 }
 
 function cutListXlsx(project, rows, hardware, bands) {
@@ -866,7 +862,7 @@ function openCutPlan(project) {
   }
   body.innerHTML = `<div class="notice">${icon('ruler')}<span>Platen: melamine ${N.plaatLengte} × ${N.plaatBreedte} mm, HPL ${N.hplLengte} × ${N.hplBreedte} mm; zaagsnede ${N.zaagsnede} mm, randafzaag ${N.randafzaag} mm (aan te passen in Instellingen). Houtdecors blijven met de nerf in de lengte van de plaat; unikleuren mogen draaien. Alle sneden lopen recht door, zoals op een plaatzaag.</span></div>`
     + (parts.join('') || '<div class="empty"><h2>Geen onderdelen</h2><p>Vul eerst de maten van de kasten in.</p></div>')
-    + `<div class="group-footer">Totaal ${totalSheets} ${totalSheets === 1 ? 'plaat' : 'platen'}. Samengestelde stukken met doorlopende nerf staan gestreept omlijnd; zaag ze eerst als één stuk. ↻ = gedraaid (alleen bij unikleuren).</div>`;
+    + `<div class="group-footer">Totaal ${totalSheets} ${totalSheets === 1 ? 'plaat' : 'platen'}. Op elk stuk staan de benaming en de maat (lengte × breedte); de lijst onder elke plaat geeft hetzelfde in tekst. Samengestelde stukken met doorlopende nerf staan gestreept omlijnd; zaag ze eerst als één stuk. ↻ = gedraaid (alleen bij unikleuren).</div>`;
   openSheet({ title: `Zaagplan ${project.naam}`, full: true, left: { label: 'Klaar', bold: true },
     right: { label: 'Afdrukken', onClick: () => window.print() }, body });
 }
@@ -874,9 +870,26 @@ function openCutPlan(project) {
 /** Tekening van één plaat met de stukken erop; elk stuk krijgt een nummer (de lijst komt in `list`). */
 function sheetSVG(sh, N, color, list) {
   const L = N.plaatLengte, B = N.plaatBreedte;
+  // Benaming en maat van het stuk op de plaat; bij smalle, hoge stukken verticaal geschreven.
   const label = (x, y, w, h, n) => {
-    const size = Math.max(22, Math.min(90, Math.min(w, h) * 0.45));
-    return `<text x="${x + w / 2}" y="${y + h / 2 + size * 0.35}" font-size="${size}" text-anchor="middle" class="plan-label">${n}</text>`;
+    const it = list[n - 1];
+    const vertical = h > w * 1.3;
+    const len = vertical ? h : w, thick = vertical ? w : h;
+    const name = it.label, dims = `${mm(it.L)} × ${mm(it.B)}${it.rotated ? ' ↻' : ''}`;
+    // Lettergrootte: past in de lengte (ca. 0,55 × grootte per teken) en in de dikte (twee regels).
+    let size = Math.min(70, (len - 16) / (Math.max(name.length, dims.length) * 0.64), (thick - 10) / 2.4);
+    let lines = [name, dims];
+    if (size < 18) {
+      // Te klein voor twee regels: één regel met de naam, eventueel ingekort.
+      size = Math.min(60, (thick - 8) / 1.2);
+      const max = Math.floor((len - 12) / (size * 0.64));
+      lines = [name.length > max ? name.slice(0, Math.max(1, max - 1)) + '…' : name];
+      if (size < 10 || max < 2) return '';
+    }
+    const cx = x + w / 2, cy = y + h / 2;
+    const tr = vertical ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
+    const lh = size * 1.15;
+    return `<g${tr}>` + lines.map((t, i) => `<text x="${cx}" y="${cy + (i - (lines.length - 1) / 2) * lh + size * 0.35}" font-size="${i ? size * 0.85 : size}" text-anchor="middle" class="${i ? 'plan-dims' : 'plan-label'}">${esc(t)}</text>`).join('') + '</g>';
   };
   let g = `<rect x="0" y="0" width="${L}" height="${B}" class="plan-board"/>`;
   for (const p of sh.placed) {
@@ -933,6 +946,45 @@ function openMprText(k, p) {
     } }, body });
 }
 
+// MARK: - Kasten uit andere projecten
+
+function importCabinets(project, onDone) {
+  const others = Store.projects.filter(x => x !== project && x.kasten.length);
+  if (!others.length) { alertBox('Geen andere projecten', 'Er zijn geen andere projecten met kasten op dit toestel. Een project van een ander toestel open je eerst via "Projectbestand openen".'); return; }
+  const body = el(`<div class="content">${others.map(o => `<div class="group"><div class="group-header"><span>${esc(o.naam)}</span>
+      <button type="button" class="link-btn" data-all="${o.id}">Alles</button></div><div class="group-body">
+      ${o.kasten.map(k => `<label class="row"><input type="checkbox" class="pick" data-p="${o.id}" data-k="${k.id}">
+        <span class="kast-code">${esc(k.code)}</span><span class="row-main"><span>${esc(PRESETS.find(x => x.id === k.type)?.naam ?? k.type)}</span>
+        <span class="row-sub">${k.breedte ?? '?'} × ${k.hoogte ?? '?'} × ${k.diepte ?? '?'} mm</span></span></label>`).join('')}
+    </div></div>`).join('')}
+    <div class="group-footer">De gekozen kasten worden gekopieerd naar "${esc(project.naam)}". Het andere project blijft ongewijzigd.</div></div>`);
+  const sheet = openSheet({ title: 'Kasten toevoegen', left: { label: 'Annuleer' }, body,
+    right: { label: 'Voeg toe', bold: true, onClick: () => {
+      const picked = $$('.pick:checked', body);
+      const used = new Set(project.kasten.map(k => k.code));
+      let n = project.kasten.length;
+      for (const c of picked) {
+        const src = Store.projects.find(x => x.id === c.dataset.p).kasten.find(k => k.id === c.dataset.k);
+        const copy = JSON.parse(JSON.stringify(src));
+        copy.id = uid();
+        // Code behouden als die nog vrij is, anders een nieuwe.
+        if (used.has(copy.code)) { do { n++; copy.code = `K${n}`; } while (used.has(copy.code)); }
+        used.add(copy.code);
+        copy.plaatsing = 'auto';
+        project.kasten.push(copy);
+      }
+      touch(project);
+      sheet.close();
+      onDone();
+      if (picked.length) alertBox('Kasten toegevoegd', `${picked.length} ${picked.length === 1 ? 'kast' : 'kasten'} toegevoegd. Ze staan automatisch achteraan in de opstelling.`);
+    } } });
+  $$('[data-all]', body).forEach(b => b.addEventListener('click', () => {
+    const boxes = $$(`.pick[data-p="${b.dataset.all}"]`, body);
+    const on = !boxes.every(x => x.checked);
+    boxes.forEach(x => { x.checked = on; });
+  }));
+}
+
 // MARK: - Projectbestand
 
 function shareProject(p) {
@@ -966,7 +1018,7 @@ const SETTING_GROUPS = [
   ['Platen', [['plaat', 'Korpus (mm)'], ['front', 'Fronten (mm)'], ['rug', 'Rug in groef (mm)'], ['rugDik', 'Opgeschroefde rug (mm)'], ['ladeBodemDikte', 'Ladebodem en -rug (mm)']]],
   ['Rugwandgroef', [['groefBreedte', 'Breedte'], ['groefDiepte', 'Diepte'], ['rugInsprong', 'Afstand tot achterkant'], ['rugSpeling', 'Speling per kant'], ['rugSchroefAfstand', 'Schroefafstand opgeschroefde rug']]],
   ['Kantenband', [['bandKorpus', 'Voorkant korpus (mm)'], ['bandLegplank', 'Voorkant legplank (mm)'], ['bandFront', 'Rondom fronten (mm)']]],
-  ['Fronten', [['voeg', 'Voeg tussen fronten'], ['deurMaxBreedte', 'Max. breedte van één deur'], ['greepHartafstand', 'Greep hart-op-hart'], ['greepRand', 'Greep afstand tot rand'], ['greepVanBoven', 'Greep (deur) vanaf boven'], ['greeplijstBinnenHoogte', 'Greeplijst: binnenhoogte'], ['greeplijstBinnenDiepte', 'Greeplijst: binnendiepte']]],
+  ['Fronten', [['voeg', 'Voeg tussen fronten'], ['deurMaxBreedte', 'Max. breedte van één deur'], ['greepHartafstand', 'Greep hart-op-hart (standaard)'], ['greepDia', 'Greepgat Ø'], ['greepRand', 'Greep afstand tot rand'], ['greepVanBoven', 'Greep (deur) vanaf boven'], ['greeplijstBinnenHoogte', 'Greeplijst: binnenhoogte'], ['greeplijstBinnenDiepte', 'Greeplijst: binnendiepte']]],
   ['Deuvels en schroeven', [['deuvelDia', 'Deuvel Ø'], ['deuvelLengte', 'Deuvel lengte'], ['deuvelMarge', 'Eerste en laatste vanaf de rand'], ['deuvelAfstand', 'Tussenafstand (ongeveer)'], ['deuvelDiepteVlak', 'Diepte in het vlak'], ['deuvelDiepteKant', 'Diepte in de kant'], ['schroefDia', 'Schroefgat Ø']]],
   ['Clamex', [['clamexMarge', 'Eerste vanaf rand'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexToegangDia', 'Toegangsgat Ø'], ['clamexToegangAfstand', 'Toegangsgat vanaf kant']]],
   ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder']]],
@@ -1006,32 +1058,6 @@ const SettingsView = {
     box.appendChild(reset);
   },
 
-  renderGrepen() {
-    const box = $('#st-grepen');
-    const s = S();
-    box.innerHTML = '';
-    const merken = [...new Set(s.grepen.map(g => g.merk))].sort();
-    for (const merk of merken) {
-      box.appendChild(el(`<div class="row sub-head"><span class="row-sub"><b>${esc(merk || 'Zonder merk')}</b></span></div>`));
-      for (const g of s.grepen.filter(x => x.merk === merk)) {
-        const r = el(`<div class="row"><button class="row-main" type="button" style="text-align:left"><span>${esc(g.artikel || g.naam || 'Greep')}</span>
-          <span class="row-sub">${esc([g.naam && g.artikel ? g.naam : '', Number(g.hartafstand) ? `${g.hartafstand} mm` : 'knop', `Ø${g.dia}`].filter(Boolean).join(' · '))}</span></button>
-          <button class="mini danger" type="button" aria-label="Verwijder">${icon('trash')}</button></div>`);
-        $('.row-main', r).addEventListener('click', () => openGreepForm(g, upd => { Object.assign(g, upd); Store.save(); this.renderGrepen(); }));
-        $('.mini', r).addEventListener('click', async () => {
-          const ok = await alertBox('Greep verwijderen?', greepLabel(g), [{ label: 'Annuleer', role: 'cancel', value: 'no' }, { label: 'Verwijder', role: 'destructive', value: 'yes' }]);
-          if (ok === 'yes') { s.grepen = s.grepen.filter(x => x !== g); Store.save(); this.renderGrepen(); }
-        });
-        box.appendChild(r);
-      }
-    }
-    const add = el(`<button class="row button" type="button"><span class="icon-label">${icon('plus')}Greep toevoegen</span></button>`);
-    add.addEventListener('click', () => openGreepForm(null, g => { s.grepen.push(g); Store.save(); this.renderGrepen(); }));
-    const paste = el(`<button class="row button" type="button"><span class="icon-label">${icon('table')}Lijst plakken (Excel)</span></button>`);
-    paste.addEventListener('click', () => openGreepImport(n => { this.renderGrepen(); if (n) alertBox('Grepen toegevoegd', `${n} ${n === 1 ? 'greep' : 'grepen'} toegevoegd aan de catalogus.`); }));
-    box.append(add, paste);
-  },
-
   renderDecors() {
     const box = $('#st-decors');
     const s = S();
@@ -1063,14 +1089,15 @@ const SettingsView = {
     const v = $('#view-settings');
     const s = S();
     v.innerHTML = `
-      <header class="navbar"><div class="navbar-row"><div class="navbar-title">Instellingen</div></div></header>
-      <div class="content">
-        <div class="notice">${icon('ruler')}<span>Alle maten in mm. Wijzigingen gelden meteen voor alle kasten in alle projecten.</span></div>
+      <header class="navbar"><div class="navbar-row">
+        <div class="navbar-left"><button class="nav-btn hidden" type="button" id="st-back">${icon('left')}Instellingen</button></div>
+        <div class="navbar-title" id="st-title">Instellingen</div></div></header>
+      <div class="content" id="st-content">
+        <div id="st-menu"></div>
+        <div class="notice" data-cat="*">${icon('ruler')}<span>Alle maten in mm. Wijzigingen gelden meteen voor alle kasten in alle projecten.</span></div>
         ${SETTING_GROUPS.map(([title, fields]) => `<div class="group"><div class="group-header">${title}</div><div class="group-body">
           ${fields.map(([key, label]) => row(label, numHTML(`st-${key}`, s[key]))).join('')}
         </div></div>`).join('')}
-        <div class="group"><div class="group-header">Greepcatalogus</div><div class="group-body" id="st-grepen"></div>
-          <div class="group-footer">Grepen uit de catalogus van Häfele, Dupont of een ander merk. Per kast kies je de greep; per front kan het een andere zijn.</div></div>
         <div class="group"><div class="group-header">Decors</div><div class="group-body" id="st-decors"></div>
           <div class="group-body" style="margin-top:10px">
             ${row('Standaard korpus', decorSelectHTML('st-decorKorpus', s.decorKorpus))}
@@ -1085,7 +1112,9 @@ const SettingsView = {
           ${row('HPL: plaatbreedte', numHTML('nz-hplBreedte', s.nest.hplBreedte))}
           ${row('Zaagsnede', numHTML('nz-zaagsnede', s.nest.zaagsnede))}
           ${row('Randafzaag', numHTML('nz-randafzaag', s.nest.randafzaag))}
-        </div><div class="group-footer">De nerf loopt in de lengte van de plaat.</div></div>
+          ${row('CSV: scheidingsteken', selectHTML('nz-csvScheiding', [[';', 'Puntkomma ;'], [',', 'Komma ,'], ['\t', 'Tab']], s.nest.csvScheiding ?? ';'))}
+          ${row('CSV: decimaalteken', selectHTML('nz-csvDecimaal', [['.', 'Punt (12.5)'], [',', 'Komma (12,5)']], s.nest.csvDecimaal ?? '.'))}
+        </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde.</div></div>
         <div class="group"><div class="group-header">Machine (woodWOP)</div><div class="group-body">
           <div class="row"><span class="row-label">Frees voor uitsparingen</span><div class="row-fill"><input class="input-num" id="mp-freesContour" value="${esc(s.mpr.freesContour)}"></div></div>
           <div class="row"><span class="row-label">Kleine frees</span><div class="row-fill"><input class="input-num" id="mp-freesKlein" value="${esc(s.mpr.freesKlein)}"></div></div>
@@ -1113,7 +1142,7 @@ const SettingsView = {
           ${row('Geleider: gathoogte boven vak', numHTML(`bl-${serie}-gatHoogte`, s.blum[serie].gatHoogte))}
           <div class="row"><span class="row-label">Geleider: gaten vanaf voorkant</span><div class="row-fill"><input class="input-plain" id="bl-${serie}-gaten" value="${s.blum[serie].gaten.join(', ')}"></div></div>
         </div></div>`).join('')}
-        <div class="group-footer" style="margin:-16px 0 24px">Controleer de Blum-maten met de montagehandleiding van de gebruikte geleider en ladehoogte.</div>
+        <div class="group-footer" data-cat="lades" style="margin:-16px 0 24px">Controleer de Blum-maten met de montagehandleiding van de gebruikte geleider en ladehoogte.</div>
         <div class="group"><div class="group-body"><button class="row button danger" type="button" id="st-reset">Standaardwaarden herstellen</button></div></div>
         <div class="group"><div class="group-body"><div class="row"><span class="row-label">Versie</span><span class="row-value">0.2 (met MPR, nog te testen)</span></div></div>
           <div class="footer-logo" role="img" aria-label="e. baillien"></div></div>
@@ -1123,11 +1152,11 @@ const SettingsView = {
     }
     for (const key of ['schroeven', 'potDeuvels', 'systeemboringen']) $(`#st-${key}`, v).addEventListener('change', e => { s[key] = e.target.checked; Store.save(); });
     this.renderDecors();
-    this.renderGrepen();
     this.renderTools();
     $('#st-frontMateriaal', v).addEventListener('change', e => { s.frontMateriaal = e.target.value; Store.save(); });
     for (const key of ['decorKorpus', 'decorFront']) bindDecor($(`#st-${key}`, v), val => { s[key] = val; Store.save(); this.render(); });
-    for (const key of Object.keys(NEST_DEFAULTS)) $(`#nz-${key}`, v).addEventListener('change', e => { if (e.target.value !== '') { s.nest[key] = Number(e.target.value); Store.save(); } });
+    for (const key of Object.keys(NEST_DEFAULTS)) $(`#nz-${key}`, v)?.addEventListener('change', e => { if (e.target.value !== '') { s.nest[key] = Number(e.target.value); Store.save(); } });
+    for (const key of ['csvScheiding', 'csvDecimaal']) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value; Store.save(); });
     for (const key of Object.keys(MPR_DEFAULTS)) {
       $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'doorExtra' ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });
     }
@@ -1157,6 +1186,66 @@ const SettingsView = {
       const ok = await alertBox('Standaardwaarden herstellen?', 'Alle instellingen gaan terug naar de standaard. Je projecten blijven bewaard.', [{ label: 'Annuleer', role: 'cancel', value: 'no' }, { label: 'Herstel', role: 'destructive', value: 'yes' }]);
       if (ok === 'yes') { Store.settings = mergeSettings(null); Store.save(); this.render(); }
     });
+    this.organize();
+  },
+
+  /** Instellingen als menu: per categorie een eigen pagina in plaats van één lange lijst. */
+  cat: null,
+  organize() {
+    const v = $('#view-settings');
+    const CATS = [
+      { id: 'platen', naam: 'Platen en kantenband', icon: 'table', groepen: ['Platen', 'Kantenband', 'Rugwandgroef'] },
+      { id: 'decors', naam: 'Decors', icon: 'eye', groepen: ['Decors'] },
+      { id: 'constructie', naam: 'Constructie', icon: 'cube', groepen: ['Deuvels en schroeven', 'Clamex', 'Systeemboringen', 'Opties', 'Overige'] },
+      { id: 'fronten', naam: 'Fronten, scharnieren en grepen', icon: 'list', groepen: ['Fronten', 'Scharnieren'] },
+      { id: 'lades', naam: 'Lades (Blum)', icon: 'explode', groepen: ['Blum'] },
+      { id: 'led', naam: 'Led-verlichting', icon: 'plus', groepen: ['Led-verlichting'] },
+      { id: 'zaagplan', naam: 'Zaagplan', icon: 'ruler', groepen: ['Zaagplan'] },
+      { id: 'machine', naam: 'Machine en gereedschap', icon: 'gear', groepen: ['Machine', 'Gereedschap'] },
+    ];
+    // Elke groep krijgt zijn categorie volgens de titel; groepen zonder titel (herstellen, versie) staan op het menu.
+    for (const g of $$('#st-content > .group', v)) {
+      const title = $('.group-header', g)?.textContent.trim() ?? '';
+      const cat = CATS.find(c => c.groepen.some(n => title.startsWith(n)));
+      g.dataset.cat = cat ? cat.id : 'menu';
+    }
+    const menu = $('#st-menu', v);
+    menu.innerHTML = `<div class="group"><div class="group-body">${CATS.map(c => `<button class="row link" type="button" data-open="${c.id}">
+      <span class="icon-label">${icon(c.icon)}${c.naam}</span><span class="row-sub st-sum" style="margin-left:auto">${this.summary(c.id)}</span><span class="chev">${icon('right')}</span></button>`).join('')}</div>
+      <div class="group-footer">Alle maten in mm. Wijzigingen gelden meteen voor alle kasten in alle projecten.</div></div>`;
+    $$('[data-open]', menu).forEach(b => b.addEventListener('click', () => { this.cat = b.dataset.open; this.show(CATS); v.scrollTop = 0; }));
+    $('#st-back', v).addEventListener('click', () => { this.cat = null; this.show(CATS); v.scrollTop = 0; });
+    if (this.cat && !CATS.some(c => c.id === this.cat)) this.cat = null;
+    this.show(CATS);
+  },
+
+  show(CATS) {
+    const v = $('#view-settings');
+    const cat = this.cat;
+    $('#st-menu', v).classList.toggle('hidden', !!cat);
+    $('#st-back', v).classList.toggle('hidden', !cat);
+    $('#st-title', v).textContent = cat ? CATS.find(c => c.id === cat).naam : 'Instellingen';
+    for (const e of $$('#st-content > [data-cat]', v)) {
+      const c = e.dataset.cat;
+      e.classList.toggle('hidden', cat ? !(c === cat || c === '*') : c !== 'menu');
+    }
+    if (!cat) $$('.st-sum', v).forEach((x, i) => { x.textContent = this.summary(CATS[i].id); });
+  },
+
+  /** Korte samenvatting naast elke categorie. */
+  summary(id) {
+    const s = S();
+    switch (id) {
+      case 'platen': return `${s.plaat} mm · rug ${s.rug} mm`;
+      case 'decors': return `${s.decors.length} decors`;
+      case 'constructie': return `deuvels ${s.deuvelDia} × ${s.deuvelLengte}`;
+      case 'fronten': return `greep ${s.greepHartafstand} mm`;
+      case 'lades': return SERIES.join(', ');
+      case 'led': return `${s.ledBreedte} × ${s.ledDiepte}`;
+      case 'zaagplan': return `${s.nest.plaatLengte} × ${s.nest.plaatBreedte}`;
+      case 'machine': return `${s.tools.length} gereedschappen`;
+      default: return '';
+    }
   },
 };
 

@@ -90,6 +90,11 @@ class Viewer {
     this.items = [];
     const bounds = new THREE.Box3();
     for (const cab of cabinets) {
+      // Elke kast in een eigen groep: positie in het project en draaiing rond de linkerachterhoek.
+      const holder = new THREE.Group();
+      holder.position.set(cab.offsetX ?? 0, cab.offsetY ?? 0, cab.offsetZ ?? 0);
+      holder.rotation.y = -THREE.MathUtils.degToRad(cab.rot ?? 0);
+      this.group.add(holder);
       const cabBox = new THREE.Box3();
       for (const p of cab.parts) cabBox.expandByPoint(new THREE.Vector3(p.box.x, p.box.y, p.box.z)).expandByPoint(new THREE.Vector3(p.box.x + p.box.w, p.box.y + p.box.h, p.box.z + p.box.d));
       const center = cabBox.getCenter(new THREE.Vector3());
@@ -102,19 +107,30 @@ class Viewer {
         const dark = (partColor(p) >> 16 & 255) + (partColor(p) >> 8 & 255) + (partColor(p) & 255) < 200;
         const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: dark ? 0x9a9a9a : 0x3a3226, transparent: true, opacity: 0.45 }));
         mesh.add(lines);
-        this.group.add(mesh);
-        this.items.push({ mesh, lines, part: p, cab: cab.key, offsetX: cab.offsetX });
+        holder.add(mesh);
+        this.items.push({ mesh, lines, part: p, cab: cab.key });
       }
-      bounds.union(cabBox.translate(new THREE.Vector3(cab.offsetX, 0, 0)));
     }
-    this.bounds = bounds;
     this.applyState();
+    this.group.updateMatrixWorld(true);
+    for (const { mesh } of this.items) bounds.expandByObject(mesh);
+    this.bounds = bounds;
+    // Vloer onder een opstelling van meerdere kasten.
+    if (this.floor) { this.scene.remove(this.floor); this.floor.geometry.dispose(); this.floor.material.dispose(); this.floor = null; }
+    if (this.showFloor && !bounds.isEmpty()) {
+      const size = bounds.getSize(new THREE.Vector3()), c = bounds.getCenter(new THREE.Vector3());
+      const geo = new THREE.PlaneGeometry(size.x + 1200, size.z + 1200);
+      this.floor = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0xcfcac0, side: THREE.DoubleSide }));
+      this.floor.rotation.x = -Math.PI / 2;
+      this.floor.position.set(c.x, (this.floorY ?? 0) - 0.5, c.z);
+      this.scene.add(this.floor);
+    }
     if (refit || !this.fitted) this.fit();
     this.render();
   }
 
   applyState() {
-    for (const { mesh, part, cab, offsetX } of this.items) {
+    for (const { mesh, part, cab } of this.items) {
       const { base, center } = mesh.userData;
       const pos = base.clone();
       if (this.explode) {
@@ -123,7 +139,6 @@ class Viewer {
         if (part.rol === 'legplank' || part.rol === 'lade') f.set(0, 0, 60);
         pos.add(f);
       }
-      pos.x += offsetX;
       mesh.position.copy(pos);
       const isFront = part.rol === 'front';
       mesh.visible = !(isFront && this.fronts === 'verberg');

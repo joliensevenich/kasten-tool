@@ -175,7 +175,6 @@ select.picker { -webkit-appearance: none; appearance: none; border: 0; backgroun
 .lg.clamex { border-radius: 3px; background: #16a34a; border: 0; width: 16px; height: 7px; }
 .lg.band { border-radius: 0; background: #e08a1e; border: 0; width: 16px; height: 4px; }
 
-textarea.paste { width: 100%; border: 0; border-radius: 10px; background: var(--card); padding: 12px; font: 14px/1.4 ui-monospace, Menlo, monospace; outline: none; resize: vertical; }
 .sub-head { min-height: 32px; background: var(--fill); }
 .plan-sheet { padding: 10px; margin-bottom: 14px; }
 .plan-title { font-size: 13px; color: var(--text-2); margin: 0 4px 6px; }
@@ -183,7 +182,7 @@ textarea.paste { width: 100%; border: 0; border-radius: 10px; background: var(--
 .plan-svg .plan-board { fill: repeating-linear-gradient(45deg, #ddd, #ddd 10px, #eee 10px, #eee 20px); fill: #e5e5e5; stroke: #888; stroke-width: 3; }
 .plan-svg .plan-part { stroke: #3b3226; stroke-width: 3; }
 .plan-svg .plan-set { fill: none; stroke: #1d4ed8; stroke-width: 8; stroke-dasharray: 30 18; }
-.plan-svg .plan-label { fill: #111; font-weight: 700; }
+.plan-svg .plan-label { fill: #111; font-weight: 600; }
 .plan-list { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; columns: 2 260px; column-gap: 20px; }
 .plan-list li { display: flex; gap: 8px; padding: 3px 4px; break-inside: avoid; border-top: 0.5px solid var(--sep); }
 .plan-list li span:first-child { min-width: 22px; font-weight: 700; color: var(--accent); }
@@ -201,6 +200,13 @@ textarea.paste { width: 100%; border: 0; border-radius: 10px; background: var(--
   .sheet-body { overflow: visible; }
   .plan-sheet { break-inside: avoid; box-shadow: none; border: 1px solid #ccc; }
 }
+.st-sum { font-size: 13px; margin-right: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.file-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px; margin-bottom: 20px; text-align: center; }
+.file-ext { width: 64px; height: 76px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px; font-size: 15px; }
+.file-name { font-weight: 600; word-break: break-all; }
+a.row.button { text-decoration: none; }
+.link-btn { color: var(--accent); font-size: 13px; text-transform: none; }
+label.row input.pick { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
 pre.code { background: var(--card); border-radius: 10px; padding: 12px 14px; font: 12px/1.45 ui-monospace, Menlo, monospace; overflow: auto; max-height: 60vh; margin: 0; white-space: pre; }
 
 /* Zaaglijst */

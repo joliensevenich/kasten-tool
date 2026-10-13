@@ -69,9 +69,6 @@ const DEFAULT_SETTINGS = {
   greepRand: 40,
   greepVanBoven: 100,
   greepDia: 5,
-  // Greepcatalogus: { id, merk, artikel, naam, hartafstand (0 = knop met één gat), dia }
-  grepen: [],
-  greepMerken: ['Häfele', 'Dupont'],
   tipOnDia: 10,
   tipOnDiepte: 12,
   deurMaxBreedte: 600,
@@ -130,8 +127,9 @@ const BASE = {
   partType: {},                            // per stuk: ander plaattype
   uitstekOnder: 0, uitstekBoven: 0,        // fronten laten uitsteken (mm)
   houtDoorlopend: 'nee',                    // houtstructuur over de fronten: 'nee', 'kast' of 'vorige' (ook met de vorige kast)
-  greepId: '',                             // greep uit de catalogus ('' = standaard hart-op-hart uit Instellingen)
-  frontGreep: {},                          // per front: een andere greep, of 'geen'
+  plaatsing: 'auto', posX: null, posY: null, posZ: null, rot: 0, // plaats in de opstelling van het project
+  greepHart: null,                         // hart-op-hart van de greepgaten (mm); leeg = standaard, 0 = knop (één gat)
+  frontGreep: {},                          // per front: een andere hart-op-hart (mm), of 'geen'
   top: 'regels', rug: 'groef', zichtL: false, zichtR: false,
   front: 'opliggend', greep: 'greep', deuren: 'auto', scharnierKant: 'links', blindBreedte: 0, blindKant: 'links',
 };
@@ -475,13 +473,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
 
   const handleHoles = (p, vertical, freeLeft) => {
     if (k.greep !== 'greep') return;
-    const id = k.frontGreep?.[p.id] ?? k.greepId;
-    if (id === 'geen') return;
-    const g = (S.grepen ?? []).find(x => x.id === id);
-    if (id && !g) warnings.push(`De greep voor ${p.naam} staat niet meer in de catalogus; de standaardgreep wordt gebruikt.`);
-    const h = g ? Number(g.hartafstand) || 0 : S.greepHartafstand;
-    const dia = g ? Number(g.dia) || S.greepDia : S.greepDia;
-    const label = g ? `Greep ${[g.merk, g.artikel, g.naam].filter(Boolean).join(' ')}${h ? ` (${h} mm)` : ''}` : 'Greep';
+    const eigen = k.frontGreep?.[p.id];
+    if (eigen === 'geen') return;
+    const num = v => (v === null || v === undefined || v === '' ? null : Number(v));
+    const h = num(eigen) ?? num(k.greepHart) ?? S.greepHartafstand;
+    const dia = S.greepDia;
+    const label = h > 0 ? `Greep ${h} mm` : 'Knop';
     // Knop (hart-op-hart 0): één gat; anders twee gaten.
     const offsets = h > 0 ? [-h / 2, h / 2] : [0];
     if (vertical) {
@@ -696,6 +693,26 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   }
   const hardware = Object.entries(hw).map(([naam, aantal]) => ({ naam, aantal: Math.round(aantal * 100) / 100 }));
   return { parts, warnings: [...new Set(warnings)], hardware, zones, nl };
+}
+
+/**
+ * Opstelling van een project: per kast de plaats in de ruimte (mm). X langs de wand, Y = hoogte van de onderkant
+ * van het korpus boven de vloer, Z = afstand van de wand, rot = draaiing in graden (rond de linkerachterhoek).
+ * Automatisch: onderkasten en kolomkasten naast elkaar op de vloer, bovenkasten in een eigen rij op `bovenHoogte`.
+ */
+function projectLayout(project) {
+  const rows = { onder: 0, boven: 0 };
+  return project.kasten.map(k => {
+    const preset = PRESETS.find(p => p.id === k.type);
+    const boven = preset?.groep === 'Bovenkasten';
+    const plint = k.plint === 'geen' ? 0 : Number(k.plintHoogte) || 0;
+    const row = boven ? 'boven' : 'onder';
+    const auto = { x: rows[row], y: boven ? (Number(project.bovenHoogte) || 1400) : plint, z: 0, rot: 0 };
+    rows[row] += Number(k.breedte) || 0;
+    if (k.plaatsing !== 'vrij') return { ...auto, auto };
+    const num = (v, d) => (v === null || v === undefined || v === '' ? d : Number(v));
+    return { x: num(k.posX, auto.x), y: num(k.posY, auto.y), z: num(k.posZ, 0), rot: Number(k.rot) || 0, auto };
+  });
 }
 
 /** Standaard plaattype: fronten (en plint) zoals gekozen bij de kast, de rest melamine. */

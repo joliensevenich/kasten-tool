@@ -103,8 +103,9 @@ function mergeSettings(saved) {
   if (!savedMpr.groefTool) savedMpr.groefTool = MPR_DEFAULTS.groefTool;
   const out = { ...base, ...saved, blum: { ...base.blum }, mpr: { ...MPR_DEFAULTS, ...savedMpr }, nest: { ...NEST_DEFAULTS, ...(saved.nest ?? {}) },
     decors: Array.isArray(saved.decors) && saved.decors.length ? saved.decors : base.decors,
-    tools: Array.isArray(saved.tools) && saved.tools.length ? saved.tools : base.tools,
-    grepen: Array.isArray(saved.grepen) ? saved.grepen : [], greepMerken: Array.isArray(saved.greepMerken) && saved.greepMerken.length ? saved.greepMerken : base.greepMerken };
+    tools: Array.isArray(saved.tools) && saved.tools.length ? saved.tools : base.tools };
+  // De greepcatalogus bestaat niet meer: de hart-op-hart vul je per kast in.
+  delete out.grepen; delete out.greepMerken;
   // Oude standaard (deuvels om de 50,5 mm) vervangen door de nieuwe (30 mm van de randen, ongeveer 80 mm ertussen).
   if (saved.deuvelAfstand === 50.5) { out.deuvelAfstand = 80; out.deuvelMarge = 30; }
   for (const serie of Object.keys(base.blum)) {
@@ -127,14 +128,37 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-/** Deelmenu (mail, WhatsApp, AirDrop, Bewaar in Bestanden); anders downloaden. */
-async function shareFile(blob, name) {
-  const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file] }); return true; } catch (err) { if (err.name === 'AbortError') return false; }
-  }
-  download(blob, name);
-  return true;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/**
+ * Bestand aanbieden: een venster met "Downloaden" en (waar het kan) "Delen".
+ * Downloaden is een echte link die je zelf aantikt, zodat geen enkele browser hem blokkeert.
+ */
+function shareFile(blob, name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const types = { csv: 'text/csv', zip: 'application/zip', json: 'application/json', mpr: 'text/plain',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+  // Als bestand (niet als tekst in een tabblad) laten opslaan.
+  const fileBlob = new Blob([blob], { type: ext === 'csv' || ext === 'mpr' ? 'application/octet-stream' : (types[ext] ?? blob.type) });
+  const file = new File([blob], name, { type: types[ext] ?? blob.type });
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+  const url = URL.createObjectURL(fileBlob);
+  const kb = blob.size < 1024 ? `${blob.size} bytes` : `${Math.round(blob.size / 102.4) / 10} kB`;
+  const body = el(`<div class="content">
+    <div class="file-card card"><div class="file-ext">${esc(ext.toUpperCase())}</div>
+      <div class="file-name">${esc(name)}</div><div class="row-sub">${kb}</div></div>
+    <div class="group"><div class="group-body">
+      <a class="row button" id="fs-dl" href="${url}" download="${esc(name)}"><span class="icon-label">${icon('download')}Downloaden</span></a>
+      ${canShare ? `<button class="row button" type="button" id="fs-share"><span class="icon-label">${icon('share')}Delen (mail, WhatsApp, AirDrop, Bestanden)</span></button>` : ''}
+    </div><div class="group-footer">${isIOS()
+      ? 'Op een iPhone of iPad: kies <b>Delen</b> en dan <b>Bewaar in Bestanden</b>, of stuur het bestand door. Downloaden zet het in de map Downloads van de Bestanden-app.'
+      : 'Downloaden zet het bestand in je map Downloads.'}</div></div></div>`);
+  const sheet = openSheet({ title: 'Bestand klaar', left: { label: 'Klaar', bold: true }, body, onClose: () => setTimeout(() => URL.revokeObjectURL(url), 60000) });
+  $('#fs-share', body)?.addEventListener('click', async () => {
+    try { await navigator.share({ files: [file] }); sheet.close(); } catch (err) { if (err.name !== 'AbortError') alertBox('Delen lukt niet', 'Gebruik Downloaden.'); }
+  });
+  $('#fs-dl', body).addEventListener('click', () => setTimeout(() => sheet.close(), 400));
+  return Promise.resolve(true);
 }
 
 const safeName = s => String(s || 'project').replace(/[\\/:*?"<>|]+/g, '-').trim();
