@@ -100,12 +100,12 @@ const Projects = {
             </div>
           </div>
           <div class="split-side">
-            <div class="group"><div class="group-header">Kasten</div><div class="group-body" id="pj-list"></div></div>
+            <div class="group"><div class="group-header head-with-btn"><span>Kasten</span>
+              <button type="button" class="head-btn" id="pj-add">${icon('plus')}Kast toevoegen</button></div><div class="group-body" id="pj-list"></div></div>
             <div class="group"><div class="group-header">Opstelling</div><div class="group-body">
               ${row('Bovenkasten: onderkant boven vloer', numHTML('pj-boven', p.bovenHoogte ?? '', '1400'))}
             </div><div class="group-footer">Automatisch staan onder- en kolomkasten naast elkaar op de vloer, en bovenkasten in een eigen rij op deze hoogte. Per kast kun je "Plaatsing" op Vrij zetten, voor een hoek, een eiland of bovenkasten boven een bepaalde onderkast.</div></div>
             <div class="group"><div class="group-body">
-              <button class="row button" type="button" id="pj-add"><span class="icon-label">${icon('plus')}Kast toevoegen</span></button>
               <button class="row button" type="button" id="pj-cut"><span class="icon-label">${icon('table')}Zaaglijst en beslag</span></button>
               <button class="row button" type="button" id="pj-plan"><span class="icon-label">${icon('explode')}Zaagplan (platen)</span></button>
               <button class="row button" type="button" id="pj-mpr"><span class="icon-label">${icon('download')}MPR-bestanden (woodWOP)</span></button>
