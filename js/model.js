@@ -579,12 +579,14 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       }
       warnings.push(`Schuine top: voor- en achterkant schuin zagen (${deg}°), zodat de voorkant verticaal staat en de achterkant tegen de rug sluit. Zaagmaat = lange kant.`);
     } else {
-      // Trapkast: de top loopt tot over de buitenkant van de zijwanden en sluit er in verstek op aan.
-      const dd = D - voorRug, Ls = W / cosA;
+      // Trapkast: de top loopt tot over de buitenkant van de zijwanden en sluit er in verstek op aan,
+      // over de volle diepte; de rug zit bovenaan in een groef in de onderkant van de top.
+      const dd = D - zBack, Ls = W / cosA;
       const y0 = yTopX(0), yW = yTopX(W), yi0 = yTopX(t) - tAt, yiW = yTopX(W - t) - tAt;
       const yMin = Math.min(yi0, yiW), yMax = Math.max(y0, yW);
-      const top = tilted({ box: { x: 0, y: yMin, z: voorRug, w: W, h: yMax - yMin, d: dd },
+      const top = tilted({ box: { x: 0, y: yMin, z: zBack, w: W, h: yMax - yMin, d: dd },
         shape3d: { plane: 'xy', pts: [[t, yi0 - yMin], [W - t, yiW - yMin], [W, yW - yMin], [0, y0 - yMin]] }, uLen: Ls, vLen: dd });
+      if (groef) top.ops.push({ kind: 'groef', face: 'onder', u1: 0, v1: S.rugInsprong + gw / 2, u2: Ls, v2: S.rugInsprong + gw / 2, breedte: gw, diepte: gd, naam: 'Rugwandgroef' });
       // Verstekhoek per kant: de hoek tussen zijwand en top, elk stuk de helft.
       const joint = left => ((left !== rechtsHoog) ? 90 - deg : 90 + deg);
       for (const sd of sides) {
@@ -673,7 +675,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const zRug = zBack + S.rugInsprong + gw / 2;
       // Schuine kast: de rug loopt door tot tegen de schuine bovenkant (de top stopt vóór de rug), zodat achteraan niets open staat.
       const zRugAchter = zBack + S.rugInsprong + (gw - S.rug) / 2;
-      const ytTop = vb ? yTopZ(zRugAchter) : lr ? Math.max(yTopX(t), yTopX(W - t)) : H;
+      const ytTop = vb ? yTopZ(zRugAchter) : lr ? Math.max(yTopX(t), yTopX(W - t)) - t / cosA + (gd - gs) : H;
       const yt = b === last ? (verlBoven ? H - t - S.verluchtingSpleet : ytTop) : bounds[b + 1].hi;
       const label = segName(segments.length, idx);
       // Groef in de zijwanden alleen waar deze rug zit; onder- en bovenaan loopt hij uit de plaat.
@@ -686,7 +688,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         box: { x: t - (gd - gs), y: yb, z: zBack + S.rugInsprong + (gw - S.rug) / 2, w: W - 2 * t + 2 * (gd - gs), h: yt - yb, d: S.rug },
         uLen: W - 2 * t + 2 * (gd - gs), vLen: yt - yb,
       });
-      if (b === last) shapeTopLR(rugPart, x => yTopX(x));
+      if (b === last) shapeTopLR(rugPart, x => yTopX(x) - t / cosA + (gd - gs));
     });
   } else if (k.rug === 'opgeschroefd') {
     segments.forEach(([a, b], idx) => {
@@ -1216,7 +1218,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
 
   // Schuine kast: schroefgaten in de rug in de schuine top (langs de lijn waar de top tegen de rug komt).
   const schuinTop = parts.find(x => x.id === 'top' && x.rol === 'schuin');
-  if (schuin && groef && schuinTop) {
+  if (vb && groef && schuinTop) {
     const rug = parts.filter(x => x.rol === 'rug').sort((a, b) => (b.box.y + b.box.h) - (a.box.y + a.box.h))[0];
     const tAt = t / cosA;
     if (rug) for (const u of spreadPositions(W - 2 * t, S.rugSchroefAfstand, 50)) {
