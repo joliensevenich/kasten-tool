@@ -109,7 +109,7 @@ const Projects = {
               <button class="row button" type="button" id="pj-cut"><span class="icon-label">${icon('table')}Zaaglijst en beslag</span></button>
               <button class="row button" type="button" id="pj-plan"><span class="icon-label">${icon('explode')}Zaagplan (platen)</span></button>
               <button class="row button" type="button" id="pj-mpr"><span class="icon-label">${icon('download')}MPR-bestanden (woodWOP)</span></button>
-              <button class="row button" type="button" id="pj-csv"><span class="icon-label">${icon('table')}Zaaglijst CSV (Schelling HPO)</span></button>
+              <button class="row button" type="button" id="pj-csv"><span class="icon-label">${icon('table')}Zaaglijst STK (Schelling HPO)</span></button>
               <button class="row button" type="button" id="pj-import"><span class="icon-label">${icon('copy')}Kasten uit ander project toevoegen</span></button>
               <button class="row button" type="button" id="pj-share"><span class="icon-label">${icon('share')}Projectbestand delen</span></button>
             </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand, per kast een map.</div></div>
@@ -131,7 +131,8 @@ const Projects = {
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));
     $('#pj-csv', v).addEventListener('click', () => {
       if (!p.kasten.length) { alertBox('Geen kasten', 'Voeg eerst kasten toe aan het project.'); return; }
-      shareFile(cutListCsv(p, cutRows(p).rows), `Zaaglijst ${safeName(p.naam)}.csv`);
+      const stk = cutListStk(p, cutRows(p).rows);
+      shareFile(stk.blob, stk.name);
     });
     $('#pj-plan', v).addEventListener('click', () => openCutPlan(p));
     $('#pj-share', v).addEventListener('click', () => shareProject(p));
@@ -321,7 +322,7 @@ function openCabinet(project, k, selectId = null) {
         ${k.secties.some(x => x.type === 'toestel') ? `<div class="row"><span class="row-label">Verluchting onder en boven</span>${toggleHTML('f-verluchting', k.verluchting ?? k.secties.some(x => x.verluchting))}</div>` : ''}
         <div class="row"><span class="row-label">Zijwand links in zicht</span>${toggleHTML('f-zichtL', k.zichtL)}</div>
         <div class="row"><span class="row-label">Zijwand rechts in zicht</span>${toggleHTML('f-zichtR', k.zichtR)}</div>
-      </div><div class="group-footer">Laat een dikte leeg voor de standaard uit Instellingen. Bij een rug in een groef groeit de groef mee met de rug.${k.secties.some(x => x.type === 'toestel') ? ` Met toestellen: geen rug achter de toestellen en de rug ${S().rugInsprongToestel} mm naar voren; verluchting is een dubbele bodem onderaan en een dubbele regel bovenaan (één naar achteren).` : ''} Een zijwand in zicht wordt verbonden met Clamex, anders met deuvels en schroeven.</div></div>
+      </div><div class="group-footer">Laat een dikte leeg voor de standaard uit Instellingen. Bij een rug in een groef groeit de groef mee met de rug.${k.secties.some(x => x.type === 'toestel') ? ` Met toestellen: geen rug achter de toestellen en de rug ${S().rugInsprongToestel} mm naar voren; verluchting is een dubbele bodem onderaan en een dubbele regel bovenaan: de binnenste gelijk met de voorkant, de buitenste naar achteren. Met een volle top komt er bovenaan geen dubbele regel: de lucht gaat achter de rug naar boven.` : ''} Een zijwand in zicht wordt verbonden met Clamex, anders met deuvels en schroeven.</div></div>
 
       <div class="group"><div class="group-header">Decor</div><div class="group-body">
         ${row('Korpus', decorSelectHTML('f-decorKorpus', k.decorKorpus ?? '', [['', `Standaard (${S().decorKorpus})`]]))}
@@ -791,9 +792,10 @@ function openCutList(project) {
     title: `Zaaglijst ${project.naam}`, full: true, left: { label: 'Klaar', bold: true },
     right: { icon: 'share', label: 'Exporteren', onClick: async () => {
       const c = await actionSheet('Zaaglijst exporteren', '', [
-        { label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'CSV voor de zaag (HPO, Schelling)', value: 'csv' }]);
+        { label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'STK voor de zaag (Schelling HPO)', value: 'stk' }, { label: 'CSV', value: 'csv' }]);
       if (c === 'xlsx') shareFile(cutListXlsx(project, rows, hardware, bands), `Zaaglijst ${safeName(project.naam)}.xlsx`);
       if (c === 'csv') shareFile(cutListCsv(project, rows), `Zaaglijst ${safeName(project.naam)}.csv`);
+      if (c === 'stk') { const stk = cutListStk(project, rows); shareFile(stk.blob, stk.name); }
     } },
     body,
   });
@@ -821,6 +823,80 @@ function cutListCsv(project, rows) {
       band(r, 'L1'), band(r, 'L2'), band(r, 'B1'), band(r, 'B2')].map(cell).join(sep));
   });
   return new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv' });
+}
+
+// MARK: - STK voor de Schelling-zaag (HPO), volgens "NC data format 4.12 for standard import"
+// Vaste kolommen gescheiden door één spatie; tekstvelden links uitgelijnd en aangevuld met spaties,
+// getallen rechts uitgelijnd met voorloopnullen; maten in 1/1000 mm; elke regel eindigt met CR LF.
+
+const stkText = (v, n) => {
+  // Alleen ASCII (é → e) en zonder regeleinden.
+  const t = String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '').slice(0, n);
+  return t.padEnd(n, ' ');
+};
+const stkNum = (v, n) => String(Math.max(0, Math.round(Number(v) || 0))).slice(-n).padStart(n, '0');
+const stkMm = mmValue => stkNum(Math.round(Number(mmValue) * 1000), 8);
+const stkLine = fields => fields.join(' ');
+
+/** Plaattype zoals in de platendatabank van HPO: decorcode, met " HPL" voor HPL. */
+const stkBoardType = r => `${r.decor}${(r.plaattype ?? 'Melamine') === 'HPL' ? ' HPL' : ''}`;
+
+/** Naam van de stuklijst: tevens de bestandsnaam, hoogstens 20 tekens, zonder verboden tekens. */
+const stkName = project => (project.naam || 'Stuklijst').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 20) || 'Stuklijst';
+
+function cutListStk(project, rows) {
+  const today = new Date();
+  const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const name = stkName(project);
+  const lines = [];
+  // L01: kopregel van de stuklijst.
+  // (Volgens de specificatie staat het wisvlag op positie 98: de originele ordernaam beslaat daarom 21 posities.)
+  lines.push(stkLine(['L', '01', stkText(name, 20), stkText(project.naam, 20), date, date, '0', '0', '0', stkText('', 21), '0']));
+  // L06: databanken gebruiken (platen, kanten, ...), standaard stapelparameters.
+  lines.push(stkLine(['L', '06', stkText('', 20), '1', '1', '1', '1', '1', '1', '1', '1', '1', stkText('', 20)]));
+  rows.forEach((r, i) => {
+    const nr = i + 1;
+    const wood = isWoodDecor(r.decor, S().decors);
+    const bands = ['L1', 'L2', 'B1', 'B2'].filter(e => r[e]).map(e => `${e}:${r[e]} ${r[e + 'd'] ?? ''}`.trim()).join(' ');
+    // F01: één regel per onderdeel. A = lengte langs de nerf, B = breedte; zaagmaat = eindmaat.
+    lines.push(stkLine([
+      'F', '01',
+      stkNum(nr, 4),                 // volgnummer
+      stkNum(0, 4),                  // gecombineerd nummer (0 in een niet geoptimaliseerde stuklijst)
+      '0',                           // categorie: normaal stuk
+      stkNum(r.aantal, 6),           // aantal besteld
+      stkNum(0, 6),                  // aantal geoptimaliseerd
+      stkText(stkBoardType(r), 20),  // plaattype
+      stkMm(r.dikte),                // plaatdikte
+      stkMm(r.L), stkMm(r.B),        // zaagmaat A en B
+      stkMm(r.L), stkMm(r.B),        // eindmaat A en B
+      stkText(`${r.kast} ${r.naam}`, 20), // omschrijving
+      wood ? '0' : '1',              // draaibaar: houtdecor niet (nerf langs A), unikleur wel
+      '9', '9',                      // prioriteit (verplicht), kwaliteit
+      '0',                           // alleen gedraaid gebruiken: nee
+      stkNum(0, 2),                  // groep
+      stkNum(0, 6), stkNum(0, 3),    // overlevering stuks / %
+      stkNum(0, 6), stkNum(0, 3),    // onderlevering stuks / %
+      '1', '0',                      // optimaliseren: ja; klein onderdeel: nee
+      stkText(r.kast, 20),           // positienummer extern (kast)
+      stkText(r.naam, 20),           // regelnummer extern (onderdeel)
+      stkText(bands ? `Band ${bands}` : '', 40), // bewerkingsnotitie: kantenband
+      '1', '0',                      // etiket afdrukken: ja; paklijst: nee
+      stkText('', 20),               // bronbouwgroep
+      stkText(name, 20),             // bronstuklijst
+      stkNum(nr, 9),                 // nummer in de stuklijst
+      date,                          // leverdatum
+      '0', '1',                      // oriëntatie in de strook: vrij; status: handmatig ingevoerd
+      stkNum(0, 3), stkNum(0, 2), stkNum(0, 2), // intern, maatvermenigvuldiger A en B
+      stkNum(0, 7),                  // aantalcorrectie
+      '1', stkNum(0, 8),             // toegestaan in 3e fase; max. afval 3e fase
+      stkNum(0, 4), stkNum(0, 8),    // frontpatroon, primaire sleutel
+      '0', '0',                      // kanten combineren: ja; omkeren: nee
+    ]));
+  });
+  lines.push('L$');
+  return { blob: new Blob([lines.join('\r\n') + '\r\n'], { type: 'application/octet-stream' }), name: `${name}.stk` };
 }
 
 function cutListXlsx(project, rows, hardware, bands) {
@@ -1019,12 +1095,13 @@ const SETTING_GROUPS = [
   ['Rugwandgroef', [['groefBreedte', 'Breedte'], ['groefDiepte', 'Diepte'], ['rugInsprong', 'Afstand tot achterkant'], ['rugSpeling', 'Speling per kant'], ['rugSchroefAfstand', 'Schroefafstand opgeschroefde rug']]],
   ['Kantenband', [['bandKorpus', 'Voorkant korpus (mm)'], ['bandLegplank', 'Voorkant legplank (mm)'], ['bandFront', 'Rondom fronten (mm)']]],
   ['Fronten', [['voeg', 'Voeg tussen fronten'], ['deurMaxBreedte', 'Max. breedte van één deur'], ['greepHartafstand', 'Greep hart-op-hart (standaard)'], ['greepDia', 'Greepgat Ø'], ['greepRand', 'Greep afstand tot rand'], ['greepVanBoven', 'Greep (deur) vanaf boven'], ['greeplijstBinnenHoogte', 'Greeplijst: binnenhoogte'], ['greeplijstBinnenDiepte', 'Greeplijst: binnendiepte']]],
-  ['Deuvels en schroeven', [['deuvelDia', 'Deuvel Ø'], ['deuvelLengte', 'Deuvel lengte'], ['deuvelMarge', 'Eerste en laatste vanaf de rand'], ['deuvelAfstand', 'Tussenafstand (ongeveer)'], ['deuvelDiepteVlak', 'Diepte in het vlak'], ['deuvelDiepteKant', 'Diepte in de kant'], ['schroefDia', 'Schroefgat Ø']]],
-  ['Clamex', [['clamexMarge', 'Eerste vanaf rand'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexToegangDia', 'Toegangsgat Ø'], ['clamexToegangAfstand', 'Toegangsgat vanaf kant']]],
-  ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder']]],
+  ['Deuvels en schroeven', [['deuvelDia', 'Deuvel Ø'], ['deuvelLengte', 'Deuvel lengte'], ['deuvelEersteVoor', 'Eerste deuvel vanaf voor'], ['deuvelPaar', 'Tweede deuvel: + (paar)'], ['deuvelLaatsteAchter', 'Laatste deuvel vanaf achter'], ['deuvelMaxTussen', 'Max. afstand ertussen'], ['schroefVoor', 'Eerste schroef vanaf voor'], ['schroefAchter', 'Laatste schroef vanaf achter'], ['deuvelDiepteVlak', 'Diepte in het vlak'], ['deuvelDiepteKant', 'Diepte in de kant'], ['schroefDia', 'Schroefgat Ø']]],
+  ['Clamex', [['clamexMarge', 'Eerste en laatste vanaf voor/achter'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexDeuvel', 'Deuvel naast de Clamex (±)']]],
+  ['Hangkasten', [['ophangVanBoven', 'Ophanggaten vanaf boven'], ['ophangVanAchter', 'Ophanggaten vanaf achter'], ['ophangDia', 'Ophanggat Ø'], ['ophangDiepte', 'Ophanggat diepte']]],
+  ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder'], ['scharnierDeuvelDiepte', 'Deuvelgaatjes scharnier diepte'], ['plaatjeHoogte', 'Hoogte montageplaatje'], ['scharnierVrij', 'Vrij rond regels/tussenbodems'], ['demperRand', 'Demper vanaf de hoek'], ['demperDia', 'Demper Ø'], ['demperDiepte', 'Demper diepte']]],
   ['Systeemboringen', [['systeemVoor', 'Vanaf voorkant'], ['systeemAchter', 'Vanaf rug'], ['systeemRaster', 'Raster'], ['systeemMarge', 'Vanaf boven/onder'], ['systeemDia', 'Ø'], ['systeemDiepte', 'Diepte']]],
   ['Led-verlichting', [['ledBreedte', 'Breedte groef'], ['ledDiepte', 'Diepte groef'], ['ledAfstand', 'Standaard afstand tot rand'], ['ledKabelDia', 'Kabelgat Ø'], ['ledKabelAfstand', 'Kabelgat vanaf einde groef']]],
-  ['Overige', [['regelBreedte', 'Breedte regels'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['verluchtingInsprong', 'Verluchting: achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
+  ['Overige', [['regelBreedte', 'Breedte regels'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
 ];
 
 const SettingsView = {
@@ -1123,6 +1200,7 @@ const SettingsView = {
           ${row('Boren tot diepte', selectHTML('mp-boorModusBlind', [['LS', 'LS (langzaam-snel)'], ['SS', 'SS (snel-snel)']], s.mpr.boorModusBlind))}
           ${row('Doorgaand boren', selectHTML('mp-boorModusDoor', [['LSL', 'LSL (langzaam-snel-langzaam)'], ['SSS', 'SSS (snel)']], s.mpr.boorModusDoor))}
           ${row('Extra diepte doorgaand', numHTML('mp-doorExtra', s.mpr.doorExtra))}
+          <div class="row"><span class="row-label">Clamex als macro (lamello_p_system)</span>${toggleHTML('mp-clamex', s.mpr.clamex)}</div>
         </div><div class="group-footer">Gereedschapsnummers zoals in het gereedschapsbeheer van de P110. Boringen kiest woodWOP zelf op diameter; de app controleert of er een boor met die diameter en lengte is.</div></div>
         <div class="group"><div class="group-header"><span>Gereedschap P110</span><span id="tl-count"></span></div><div class="group-body" id="st-tools"></div>
           <div class="group-footer">Overgenomen van de foto's van het gereedschapsbeheer. Diameter = 2 × radius (G1), lengte = bruikbare lengte (G3.1). Tik op een regel om aan te passen.</div></div>
@@ -1130,6 +1208,8 @@ const SettingsView = {
           <div class="row"><span class="row-label">Schroeven tussen de deuvels</span>${toggleHTML('st-schroeven', s.schroeven)}</div>
           <div class="row"><span class="row-label">Deuvelgaten bij de scharnierpot</span>${toggleHTML('st-potDeuvels', s.potDeuvels)}</div>
           <div class="row"><span class="row-label">Systeemboringen voor legplanken</span>${toggleHTML('st-systeemboringen', s.systeemboringen)}</div>
+          <div class="row"><span class="row-label">Hangkasten: gaten voor ophangbeslag</span>${toggleHTML('st-ophangGaten', s.ophangGaten)}</div>
+          <div class="row"><span class="row-label">Deuren: gaten voor dempers</span>${toggleHTML('st-dempers', s.dempers)}</div>
         </div></div>
         ${SERIES.map(serie => `<div class="group"><div class="group-header">Blum ${serie}</div><div class="group-body">
           ${row('Bodem: binnenbreedte min', numHTML(`bl-${serie}-bodemB`, s.blum[serie].bodemB))}
@@ -1150,7 +1230,7 @@ const SettingsView = {
     for (const [, fields] of SETTING_GROUPS) for (const [key] of fields) {
       $(`#st-${key}`, v).addEventListener('change', e => { if (e.target.value !== '') { s[key] = Number(e.target.value); Store.save(); } });
     }
-    for (const key of ['schroeven', 'potDeuvels', 'systeemboringen']) $(`#st-${key}`, v).addEventListener('change', e => { s[key] = e.target.checked; Store.save(); });
+    for (const key of ['schroeven', 'potDeuvels', 'systeemboringen', 'ophangGaten', 'dempers']) $(`#st-${key}`, v).addEventListener('change', e => { s[key] = e.target.checked; Store.save(); });
     this.renderDecors();
     this.renderTools();
     $('#st-frontMateriaal', v).addEventListener('change', e => { s.frontMateriaal = e.target.value; Store.save(); });
@@ -1158,7 +1238,7 @@ const SettingsView = {
     for (const key of Object.keys(NEST_DEFAULTS)) $(`#nz-${key}`, v)?.addEventListener('change', e => { if (e.target.value !== '') { s.nest[key] = Number(e.target.value); Store.save(); } });
     for (const key of ['csvScheiding', 'csvDecimaal']) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value; Store.save(); });
     for (const key of Object.keys(MPR_DEFAULTS)) {
-      $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'doorExtra' ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });
+      $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'clamex' ? e.target.checked : key === 'doorExtra' ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });
     }
     for (const serie of SERIES) {
       s.blum[serie].types.forEach((ty, j) => {
@@ -1196,7 +1276,7 @@ const SettingsView = {
     const CATS = [
       { id: 'platen', naam: 'Platen en kantenband', icon: 'table', groepen: ['Platen', 'Kantenband', 'Rugwandgroef'] },
       { id: 'decors', naam: 'Decors', icon: 'eye', groepen: ['Decors'] },
-      { id: 'constructie', naam: 'Constructie', icon: 'cube', groepen: ['Deuvels en schroeven', 'Clamex', 'Systeemboringen', 'Opties', 'Overige'] },
+      { id: 'constructie', naam: 'Constructie', icon: 'cube', groepen: ['Deuvels en schroeven', 'Clamex', 'Systeemboringen', 'Hangkasten', 'Opties', 'Overige'] },
       { id: 'fronten', naam: 'Fronten, scharnieren en grepen', icon: 'list', groepen: ['Fronten', 'Scharnieren'] },
       { id: 'lades', naam: 'Lades (Blum)', icon: 'explode', groepen: ['Blum'] },
       { id: 'led', naam: 'Led-verlichting', icon: 'plus', groepen: ['Led-verlichting'] },

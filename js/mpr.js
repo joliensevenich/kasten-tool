@@ -13,7 +13,8 @@ const MPR_DEFAULTS = {
   groefTool: '1300',        // sponningzaag
   boorModusBlind: 'LS',     // langzaam-snel tot diepte
   boorModusDoor: 'LSL',     // langzaam-snel-langzaam doorgaand
-  doorExtra: 0,             // extra diepte bij doorgaand boren
+  doorExtra: 3,             // extra diepte bij doorgaand boren (P110: 21 mm bij 18 mm plaat)
+  clamex: true,             // Clamex als component-macro (lamello_p_system) in het programma
 };
 
 // Gereedschap van de HOMAG P110 (gereedschapsbeheer, foto's van 13-10-2026).
@@ -79,6 +80,153 @@ function checkDrill(tools, { dia, diepte, horizontaal, richting, door }) {
   return null;
 }
 
+
+// Clamex P-14 zoals in de programma's van de P110 (component-macro's uit lamello_p_system):
+// in het vlak met frees 202 (Lamello_router), in de kant met zaag 201 (Lamello_4s_45).
+// Letterlijk overgenomen uit K01RO0008.MPR en K02MS2005.MPR; enkel X, Y, Z/A en XY_Angle worden ingevuld.
+const CLAMEX_ROUTER = [
+"<139 \\Komponente\\",
+"IN=\"lamello_p_system\\Lamello_router.mpr\"",
+"XA=\"0.0\"",
+"YA=\"0.0\"",
+"ZA=\"0.0\"",
+"WI=\"0.0\"",
+"EM=\"0\"",
+"VA=\"X {X}\"",
+"VA=\"Y {Y}\"",
+"VA=\"Z {Z}\"",
+"VA=\"XY_Angle {XY}\"",
+"VA=\"Vertical 1\"",
+"VA=\"CA 0\"",
+"VA=\"LINE1 0000000000000000\"",
+"VA=\"P15 0\"",
+"VA=\"P14 1\"",
+"VA=\"P10 0\"",
+"VA=\"LINE2 0000000000000000\"",
+"VA=\"Trim 1\"",
+"VA=\"Drill 1\"",
+"VA=\"L_App 3\"",
+"VA=\"FeedRate 2\"",
+"VA=\"Comment 1\"",
+"VA=\"ComTurn 0\"",
+"VA=\"LINE3 0000000000000000\"",
+"VA=\"L_Diam 100.4\"",
+"VA=\"D_Diam 6\"",
+"VA=\"D_DVer 38\"",
+"VA=\"LTool_U 202\"",
+"VA=\"LINE4 0000000000000000\"",
+"VA=\"D _BSZ\"",
+"VA=\"Calc_De1 IF P15=1 THEN 15 ELSE 0\"",
+"VA=\"Calc_De2 IF P10=1 THEN 10 ELSE 0\"",
+"VA=\"Calc_De3 IF P14=1 THEN 14 ELSE 0\"",
+"VA=\"L_Depth IF Calc_De1+Calc_De2+Calc_De3>=16 THEN 15 ELSE Calc_De1+Calc_De2+Calc_De3\"",
+"VA=\"Incline IF Vertical=1 THEN 0 ELSE 90\"",
+"VA=\"Cond_U IF LTool_U<>0 AND Incline >= 0 AND Incline <= 90 THEN 1 ELSE 0\"",
+"VA=\"Process Cond_U\"",
+"VA=\"Alpha ARCCOS((L_Diam/2-L_Depth-L_App)/(L_Diam/2))\"",
+"VA=\"D_Sp_Inc L_Depth-15+7.2\"",
+"VA=\"Cond_Ang IF Incline>0 AND Incline <=90 THEN 1 ELSE 0\"",
+"VA=\"D_dZ_Inc IF Cond_Ang=1 THEN D_Sp_Inc*COS(Incline) ELSE 0\"",
+"VA=\"D_dZ_Dri IF Cond_Ang=1 THEN D-(Z-D_dZ_Inc) ELSE 0\"",
+"VA=\"InclineM IF Incline=0 THEN 0.0001 ELSE Incline\"",
+"VA=\"D_dY_Dri IF Cond_Ang=1 THEN D_dZ_Dri*TAN(90-InclineM) ELSE 0\"",
+"VA=\"D_Depth IF Cond_Ang=1 THEN SQRT(D_dY_Dri^2+D_dZ_Dri^2) ELSE 10\"",
+"VA=\"Calc_CA IF CA=0 THEN 0.01 ELSE CA\"",
+"KAT=\"Komponentenmakro\"",
+"MNM=\"Lamello_router\"",
+"KO=\"00\""
+];
+const CLAMEX_SAW = [
+"<139 \\Komponente\\",
+"IN=\"lamello_p_system\\Lamello_4s_45.mpr\"",
+"XA=\"0.0\"",
+"YA=\"0.0\"",
+"ZA=\"0.0\"",
+"WI=\"0.0\"",
+"EM=\"0\"",
+"VA=\"X {X}\"",
+"VA=\"Y {Y}\"",
+"VA=\"A {A}\"",
+"VA=\"Angle 90\"",
+"VA=\"XY_Angle {XY}\"",
+"VA=\"LINE0 0000000000000000\"",
+"VA=\"WiAg 1\"",
+"VA=\"HorAg 1\"",
+"VA=\"HSK 0\"",
+"VA=\"LINE1 0000000000000000\"",
+"VA=\"P15 0\"",
+"VA=\"P14 1\"",
+"VA=\"P10 0\"",
+"VA=\"LINE2 0000000000000000\"",
+"VA=\"Trim 1\"",
+"VA=\"measure 0\"",
+"VA=\"Drill 0\"",
+"VA=\"DrillUni 0\"",
+"VA=\"Saw 1\"",
+"VA=\"Comment 1\"",
+"VA=\"ComTurn 0\"",
+"VA=\"LINE3 0000000000000000\"",
+"VA=\"LTool_U 201\"",
+"VA=\"LTool_0 0\"",
+"VA=\"LTool_90 0\"",
+"VA=\"LSaw 500\"",
+"VA=\"L_Diam 100.4\"",
+"VA=\"D_Diam 6\"",
+"VA=\"L_App 10\"",
+"VA=\"L_Stroke 1.5\"",
+"VA=\"DClamex 7\"",
+"VA=\"D_DUni 23.5\"",
+"VA=\"D_DVer 30\"",
+"VA=\"LINE4 0000000000000000\"",
+"VA=\"VAR1 _BSX\"",
+"VA=\"VAR2 _BSY\"",
+"VA=\"VAR3 _BSZ\"",
+"VA=\"Calc_De1 IF P15=1 THEN 15 ELSE 0\"",
+"VA=\"Calc_De2 IF P10=1 THEN 10 ELSE 0\"",
+"VA=\"Calc_De3 IF P14=1 THEN 14 ELSE 0\"",
+"VA=\"L_Depth IF Calc_De1+Calc_De2+Calc_De3>=16 THEN 15 ELSE Calc_De1+Calc_De2+Calc_De3\"",
+"VA=\"InclineM IF Angle=0 THEN 0.0001 ELSE Angle\"",
+"VA=\"XX0 X\"",
+"VA=\"YY0 IF Angle=0 THEN Y ELSE COS(InclineM)*((VAR3/SIN(InclineM))-A)\"",
+"VA=\"XX90 IF Angle=0 THEN X ELSE VAR1-COS(InclineM)*((VAR3/SIN(InclineM))-A)\"",
+"VA=\"YY90 Y\"",
+"VA=\"XX180 X\"",
+"VA=\"YY180 IF Angle=0 THEN Y ELSE VAR2-COS(InclineM)*((VAR3/SIN(InclineM))-A)\"",
+"VA=\"XX270 IF Angle=0 THEN X ELSE COS(InclineM)*((VAR3/SIN(InclineM))-A)\"",
+"VA=\"YY270 Y\"",
+"VA=\"XXB1 IF XY_Angle=270 THEN XX270 ELSE XX90\"",
+"VA=\"XXB2 IF XY_Angle=0 THEN XX0 ELSE XX180\"",
+"VA=\"YYB1 IF XY_Angle=270 THEN YY270 ELSE YY90\"",
+"VA=\"YYB2 IF XY_Angle=0 THEN YY0 ELSE YY180\"",
+"VA=\"XP IF XY_Angle=270 OR XY_Angle=90 THEN XXB1 ELSE XXB2\"",
+"VA=\"YP IF XY_Angle=270 OR XY_Angle=90 THEN YYB1 ELSE YYB2\"",
+"VA=\"ZP SIN(InclineM)*((VAR3/SIN(InclineM))-A)\"",
+"VA=\"Cond_U IF LTool_U<>0 AND Angle >= 0 AND Angle <= 90 THEN 1 ELSE 0\"",
+"VA=\"Cond_0 IF LTool_0<>0 AND Angle = 0 THEN 1 ELSE 0\"",
+"VA=\"Cond_90 IF LTool_90<>0 AND Angle = 90 THEN 1 ELSE 0\"",
+"VA=\"Process Cond_U+Cond_0+Cond_90\"",
+"VA=\"D_Sp_Inc IF (P15 OR P14=1) THEN 7 ELSE 5.5\"",
+"VA=\"Cond_Ang IF Angle>0 AND Angle <=90 THEN 1 ELSE 0\"",
+"VA=\"D_dY_Inc IF Cond_Ang=1 THEN D_Sp_Inc*SIN(Angle) ELSE 0\"",
+"VA=\"D_dZ_Inc IF Cond_Ang=1 THEN D_Sp_Inc*COS(Angle) ELSE 0\"",
+"VA=\"D_dZ_Dri IF Cond_Ang=1 THEN VAR3-(ZP-D_dZ_Inc) ELSE 0\"",
+"VA=\"D_dY_Dri IF Cond_Ang=1 THEN D_dZ_Dri*TAN(90-InclineM) ELSE 0\"",
+"VA=\"D_Depth IF Cond_Ang=1 THEN SQRT(D_dY_Dri^2+D_dZ_Dri^2) ELSE 10\"",
+"VA=\"SAFE1 IF XY_Angle=0 OR XY_Angle=90 OR XY_Angle=180 OR XY_Angle=270 THEN 1 ELSE 0\"",
+"VA=\"SAFE2 IF (Angle>=22.5 AND Angle<=90) OR Angle=0 THEN 1 ELSE 0\"",
+"VA=\"SAFE3 IF HorAg=0 AND Trim=1 AND Angle=0 AND XY_Angle=0 AND Y>50 THEN 0 ELSE 1\"",
+"VA=\"SAFE4 IF HorAg=0 AND Trim=1 AND Angle=0 AND XY_Angle=90 AND X<VAR1-50 THEN 0 ELSE 1\"",
+"VA=\"SAFE5 IF HorAg=0 AND Trim=1 AND Angle=0 AND XY_Angle=180 AND Y<VAR2-50 THEN 0 ELSE 1\"",
+"VA=\"SAFE6 IF HorAg=0 AND Trim=1 AND Angle=0 AND XY_Angle=270 AND X>50 THEN 0 ELSE 1\"",
+"VA=\"SAFE SAFE1 AND SAFE2 AND SAFE3 AND SAFE4 AND SAFE5 AND SAFE6\"",
+"KAT=\"Komponentenmakro\"",
+"MNM=\"Lamello_4s_45\"",
+"KO=\"00\""
+];
+function clamexBlock(tpl, vals) {
+  return tpl.map(l => l.replace(/\{(X|Y|Z|A|XY)\}/g, (_, k) => vals[k])).join('\r\n') + '\r\n';
+}
+
 const f3 = n => String(Math.round(Number(n) * 1000) / 1000);
 
 /** Hoe een paneel op de machine ligt: welke zijde boven, en (u,v) → (X,Y). */
@@ -86,8 +234,9 @@ function mprFrame(p) {
   const faceOps = side => p.ops.filter(o => o.face === side && !o.doorgaand && o.edge == null).length;
   if (p.rol === 'zijwand') {
     const L = p.vLen, B = p.uLen;
+    // Zoals de P110-programma's: binnenkant boven, voorkant op Y = 0. Links: bovenkant op X = 0; rechts: onderkant op X = 0.
     return p.left
-      ? { up: 'binnen', down: 'buiten', L, B, map: (u, v) => [v, u] }
+      ? { up: 'binnen', down: 'buiten', L, B, map: (u, v) => [L - v, B - u] }
       : { up: 'binnen', down: 'buiten', L, B, map: (u, v) => [v, B - u] };
   }
   if (p.grain === 'u') {
@@ -97,8 +246,11 @@ function mprFrame(p) {
       ? { up: 'onder', down: 'boven', L, B, map: (u, v) => [u, v] }
       : { up: 'boven', down: 'onder', L, B, map: (u, v) => [u, B - v] };
   }
-  // Fronten en rug: binnen- of achterkant naar boven.
+  // Fronten en rug: binnen- of achterkant naar boven. Een deur met scharnieren rechts ligt gedraaid,
+  // zodat de scharnierkant altijd op Y = 0 ligt (zoals in de P110-programma's).
   const L = p.vLen, B = p.uLen;
+  const hingeRight = p.ops.some(o => o.naam === 'Scharnierpot' && o.u > B / 2);
+  if (hingeRight) return { up: 'binnen', down: 'voor', L, B, map: (u, v) => [L - v, B - u] };
   return { up: p.rol === 'rug' ? 'achter' : 'binnen', down: p.rol === 'rug' ? 'voor' : 'voor', L, B, map: (u, v) => [v, u] };
 }
 
@@ -131,7 +283,31 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
   const mapB = (u, v) => { const [x, y] = fr.map(u, v); return [x, fr.B - y]; };
 
   for (const op of p.ops) {
-    if (op.kind === 'clamex') { skipped.push(`Clamex (${op.edge ? 'in de kant' : 'in het vlak'})`); continue; }
+    if (op.kind === 'clamex') {
+      if (!M.clamex) { skipped.push(`Clamex (${op.edge ? 'in de kant' : 'in het vlak'})`); continue; }
+      if (op.edge) {
+        // In de kant: zaag 201 (Lamello_4s_45). XY_Angle = welke kant: 270 = X 0, 90 = X max, 0 = Y 0, 180 = Y max.
+        const pt = op.edge === 'u0' ? [0, op.pos] : op.edge === 'u1' ? [p.uLen, op.pos] : op.edge === 'v0' ? [op.pos, 0] : [op.pos, p.vLen];
+        const [x, y] = fr.map(pt[0], pt[1]);
+        const xy = Math.abs(x) < 0.01 ? 270 : Math.abs(x - fr.L) < 0.01 ? 90 : Math.abs(y) < 0.01 ? 0 : 180;
+        sides.A.push(clamexBlock(CLAMEX_SAW, { X: f3(x), Y: f3(y), A: f3(D / 2), XY: xy }));
+      } else {
+        // In het vlak: frees 202 (Lamello_router), zoals in de bestanden met XY_Angle 270.
+        const onB = op.face === fr.down;
+        const [x, y] = (onB ? mapB : fr.map)(op.u, op.v);
+        (onB ? sides.B : sides.A).push(clamexBlock(CLAMEX_ROUTER, { X: f3(x), Y: f3(y), Z: f3(D), XY: 270 }));
+      }
+      continue;
+    }
+    if (op.kind === 'rondgat') {
+      // Ronde uitsparing door de plaat: kamer met de kleine frees, vanaf zijde A.
+      const [x, y] = fr.map(op.u, op.v);
+      sides.A.push(block('<112 \\Tasche\\', {
+        XA: f3(x), YA: f3(y), LA: f3(op.dia), BR: f3(op.dia), RD: f3(op.dia / 2), WI: '0', TI: f3(D + 2), ZT: '0', XY: '80',
+        T_: M.freesKlein, F_: 'STANDARD', DS: '0', KO: '00',
+      }));
+      continue;
+    }
     // Doorgaande boringen (ook als ze zo diep zijn als de plaat) kunnen altijd van zijde A.
     const through = op.doorgaand || (op.kind === 'boring' && op.diepte >= D);
     const onB = op.edge == null && op.face === fr.down && !through;

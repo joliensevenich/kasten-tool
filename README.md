@@ -25,9 +25,11 @@ Per project: *MPR-bestanden (woodWOP)* maakt een zipbestand met per kast een map
 - Boringen: verticaal (`BohrVert`) en in de kant (`BohrHoriz`); woodWOP kiest de boor op diameter.
 - Rugwandgroef: zagen (`Nuten`) of frezen (`Tasche`), in te stellen bij *Instellingen › Machine*.
 - Uitsparingen: gefreesd met frees 130; frees 101 en 130 komen uit het programma GERY.mprx.
-- **Clamex staat nog niet in de bestanden**: de posities staan in `LEESMIJ.txt`; de Lamello-macro van de P110 moet daar
-  manueel geplaatst worden, tot we die macro samen kunnen overnemen.
-- In de map `voorbeelden` staan testprogramma's van een onderkast. **Controleer alles eerst in de simulatie van woodWOP.**
+- De regels komen uit de programma's van de P110 in `voorbeelden/mpr` (14-10-2026): deuvels 30/62 … P−89/P−57 (≤ 130 ertussen),
+  schroeven Ø4 (één minder dan deuvels, 45 … P−72), Clamex P-14 als component-macro (Lamello_router / Lamello_4s_45) met een deuvel
+  op ±50,5, rugwandgroef hart 23,65 van achter, rijboring 37 van voor en 65 vóór de rug, potten Ø35×14 op 22,5, ophangbeslag Ø10.
+- Ligging zoals de P110-programma's: binnenkant boven, voorkant op Y = 0; deuren met de scharnierkant op Y = 0.
+- In `voorbeelden/test Kasten tool - hangkast zoals K02` staan testprogramma's. **Controleer alles eerst in de simulatie van woodWOP.**
 
 ## Nog te doen
 

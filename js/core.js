@@ -112,6 +112,13 @@ function mergeSettings(saved) {
   if (saved.schroefDia === 5) out.schroefDia = 4;
   // Rijboring legplankdragers: 5 mm, zoals de montageplaatjes.
   if (!saved.migratie5mm) { out.systeemDia = 5; out.montageplaatDia = 5; out.migratie5mm = true; }
+  // Eenmalig: maten overnemen uit de programma's van de P110 (voorbeelden/mpr, 14-10-2026).
+  if (!saved.migratieP110) {
+    Object.assign(out, { rugInsprong: 19.3, rugSchroefAfstand: 140, deuvelDiepteKant: 21, montageplaatDiepte: 14, potDiepte: 14, potRand: 5,
+      scharnierRand: 65, systeemAchter: 65, clamexMarge: 100, clamexMaxAfstand: 400 });
+    out.mpr.doorExtra = 3;
+    out.migratieP110 = true;
+  }
   for (const serie of Object.keys(base.blum)) {
     out.blum[serie] = { ...base.blum[serie], ...(saved.blum?.[serie] ?? {}) };
     if (!Array.isArray(out.blum[serie].types) || !out.blum[serie].types.length) out.blum[serie].types = base.blum[serie].types;
@@ -140,10 +147,10 @@ const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.p
  */
 function shareFile(blob, name) {
   const ext = name.split('.').pop().toLowerCase();
-  const types = { csv: 'text/csv', zip: 'application/zip', json: 'application/json', mpr: 'text/plain',
+  const types = { stk: 'application/octet-stream', csv: 'text/csv', zip: 'application/zip', json: 'application/json', mpr: 'text/plain',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   // Als bestand (niet als tekst in een tabblad) laten opslaan.
-  const fileBlob = new Blob([blob], { type: ext === 'csv' || ext === 'mpr' ? 'application/octet-stream' : (types[ext] ?? blob.type) });
+  const fileBlob = new Blob([blob], { type: ['csv', 'mpr', 'stk'].includes(ext) ? 'application/octet-stream' : (types[ext] ?? blob.type) });
   const file = new File([blob], name, { type: types[ext] ?? blob.type });
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   const url = URL.createObjectURL(fileBlob);
