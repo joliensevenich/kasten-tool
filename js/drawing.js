@@ -247,6 +247,8 @@ function drawCabinetOverview(doc, k, res, meta) {
     const b = p.box, side = p.rol === 'zijwand' || p.rol === 'stijl';
     if (p.shape && view === 'voor' && !side) return p.shape.map(([u, v]) => [b.x + u, b.y + v]);
     if (p.shape && view === 'zij' && side) return p.shape.map(([u, v]) => [b.z + u, b.y + v]);
+    if (p.shape3d?.plane === 'xy' && view === 'voor') return p.shape3d.pts.map(([u, v]) => [b.x + u, b.y + v]);
+    if (p.shape3d?.plane === 'zy' && view === 'zij') return p.shape3d.pts.map(([u, v]) => [b.z + u, b.y + v]);
     const tz = p.tilt?.z, tx = p.tilt?.x;
     if ((tz && view === 'voor') || (tx && view === 'zij')) {
       const a = tz ?? -tx, c = view === 'voor' ? [b.x + b.w / 2, b.y + b.h / 2] : [b.z + b.d / 2, b.y + b.h / 2];

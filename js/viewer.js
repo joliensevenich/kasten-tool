@@ -19,10 +19,10 @@ function partColor(p) {
 /** Prisma voor een paneel met een vorm (p.shape in u/v), rond het midden van zijn box. */
 function shapeGeometry(p) {
   const b = p.box, c = [b.x + b.w / 2, b.y + b.h / 2, b.z + b.d / 2];
-  const side = p.rol === 'zijwand' || p.rol === 'stijl';
+  const side = p.rol === 'zijwand' || p.rol === 'stijl' || p.shape3d?.plane === 'zy';
   const at = ([u, v], e) => side ? [b.x + e - c[0], b.y + v - c[1], b.z + u - c[2]] : [b.x + u - c[0], b.y + v - c[1], b.z + e - c[2]];
   const th = side ? b.w : b.d;
-  const pts = p.shape;
+  const pts = p.shape3d?.pts ?? p.shape;
   const pos = [];
   const tri = (a, b2, c2) => pos.push(...a, ...b2, ...c2);
   for (let i = 1; i + 1 < pts.length; i++) {
@@ -124,7 +124,7 @@ class Viewer {
       for (const p of cab.parts) cabBox.expandByPoint(new THREE.Vector3(p.box.x, p.box.y, p.box.z)).expandByPoint(new THREE.Vector3(p.box.x + p.box.w, p.box.y + p.box.h, p.box.z + p.box.d));
       const center = cabBox.getCenter(new THREE.Vector3());
       for (const p of cab.parts) {
-        const geo = p.shape ? shapeGeometry(p) : new THREE.BoxGeometry(Math.max(p.box.w, 0.5), Math.max(p.box.h, 0.5), Math.max(p.box.d, 0.5));
+        const geo = p.shape || p.shape3d ? shapeGeometry(p) : new THREE.BoxGeometry(Math.max(p.box.w, 0.5), Math.max(p.box.h, 0.5), Math.max(p.box.d, 0.5));
         const mat = new THREE.MeshLambertMaterial({ color: partColor(p) });
         const mesh = new THREE.Mesh(geo, mat);
         const pos = new THREE.Vector3(p.box.x + p.box.w / 2, p.box.y + p.box.h / 2, p.box.z + p.box.d / 2);

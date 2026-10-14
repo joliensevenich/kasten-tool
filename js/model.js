@@ -541,50 +541,54 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // Top of regels (bij verluchting met regels: een tweede regel eronder, naar achter geschoven)
   const rb = S.regelBreedte;
   if (schuin) {
-    // Schuine top: een vlakke plaat langs de schuine bovenkant (in 3D gekanteld).
-    const tilted = (o) => {
-      const p = add({ id: 'top', naam: 'Top (schuin)', rol: 'schuin', mat: 'korpus', dikte: t, grain: 'u', edges: { v1: S.bandKorpus }, ...o });
-      return p;
-    };
+    // Schuine top: een vlakke plaat onder de schuine bovenkant. De uiteinden die tegen de voorkant/rug of tegen de
+    // zijwanden komen, zijn verticaal (schuin gezaagd), zodat alles sluit. In 3D: een parallellogram (shape3d).
+    const deg = r1(sa * 180 / Math.PI);
+    const tAt = t / cosA;                                   // verticale dikte van de schuine plaat
+    const over = t * tanA;                                  // extra lengte door de schuine uiteinden
+    const tilted = (o) => add({ id: 'top', naam: 'Top (schuin)', rol: 'schuin', mat: 'korpus', dikte: t, grain: 'u', edges: { v1: S.bandKorpus }, ...o });
     if (vb) {
-      const z0 = voorRug, Ls = (D - z0) / cosA, zc = (z0 + D) / 2;
-      const cy = yTopZ(zc) - cosA * t / 2, cz = zc + sinA * t / 2;
-      const top = tilted({ box: { x: t, y: cy - t / 2, z: cz - Ls / 2, w: W - 2 * t, h: t, d: Ls }, tilt: { x: -sa }, uLen: W - 2 * t, vLen: Ls });
-      // Clamex langs de schuine lijn (v = 0 is de achterkant van de top), met een deuvel aan weerszijden.
-      const at = d => { const zs = D - d * cosA; return { z: zs + sinA * t / 2, y: yTopZ(zs) - cosA * t / 2 }; };
+      const z0 = voorRug, Ls = (D - z0) / cosA;
+      const yB = yTopZ(z0), yF = yTopZ(D);
+      const top = tilted({ box: { x: t, y: yB - tAt, z: z0, w: W - 2 * t, h: yF - yB + tAt, d: D - z0 },
+        shape3d: { plane: 'zy', pts: [[0, tAt], [D - z0, yF - yB + tAt], [D - z0, yF - yB], [0, 0]] }, uLen: W - 2 * t, vLen: Ls + over });
+      // Clamex langs de schuine lijn, op het midden van de plaat (pos: vanaf de lange punt achteraan).
+      const at = d => ({ z: D - d * cosA, y: yF - tAt / 2 - d * sinA });
+      const posOf = d => over / 2 + Ls - d;
       for (const sd of sides) {
         const edge = sd.left ? 'u0' : 'u1';
         for (const c of clamexPositions(Ls, S)) {
           const q = at(c);
           sd.ops.push({ kind: 'clamex', face: 'binnen', u: sideU(q.z), v: sideV(q.y), naam: 'Clamex' });
-          top.ops.push({ kind: 'clamex', edge, pos: Ls - c, naam: 'Clamex' });
+          top.ops.push({ kind: 'clamex', edge, pos: posOf(c), naam: 'Clamex' });
           count('Lamello Clamex P-14');
           for (const d of [c - S.clamexDeuvel, c + S.clamexDeuvel]) {
             if (d < 15 || d > Ls - 15) continue;
             const r = at(d);
             sd.ops.push({ kind: 'boring', face: 'binnen', u: sideU(r.z), v: sideV(r.y), dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
-            top.ops.push({ kind: 'boring', edge, pos: Ls - d, dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
+            top.ops.push({ kind: 'boring', edge, pos: posOf(d), dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
             count(`Deuvel ${S.deuvelDia} × ${S.deuvelLengte}`);
           }
         }
       }
+      warnings.push(`Schuine top: voor- en achterkant schuin zagen (${deg}°), zodat de voorkant verticaal staat en de achterkant tegen de rug sluit. Zaagmaat = lange kant.`);
     } else {
-      const dd = D - voorRug, Ls = (W - 2 * t) / cosA, xc = W / 2;
-      const sx = rechtsHoog ? -1 : 1;                       // normaal van de top: (sx·sin, cos)
-      const cx = xc - sx * sinA * t / 2, cy = yTopX(xc) - cosA * t / 2;
-      const top = tilted({ box: { x: cx - Ls / 2, y: cy - t / 2, z: voorRug, w: Ls, h: t, d: dd }, tilt: { z: rechtsHoog ? sa : -sa }, uLen: Ls, vLen: dd });
+      const dd = D - voorRug, Ls = (W - 2 * t) / cosA;
+      const yL = yTopX(t), yR = yTopX(W - t);
+      const yMin = Math.min(yL, yR) - tAt, yMax = Math.max(yL, yR);
+      const top = tilted({ box: { x: t, y: yMin, z: voorRug, w: W - 2 * t, h: yMax - yMin, d: dd },
+        shape3d: { plane: 'xy', pts: [[0, yL - tAt - yMin], [W - 2 * t, yR - tAt - yMin], [W - 2 * t, yR - yMin], [0, yL - yMin]] }, uLen: Ls + over, vLen: dd });
       // Uiteinden schuin gezaagd; Clamex in de zijwand en (onder de hoek van de trap) in het schuine uiteinde van de top.
-      const deg = r1(sa * 180 / Math.PI);
       for (const sd of sides) {
         const xe = sd.left ? t : W - t;
-        const ye = yTopX(xe) - t / 2 / cosA;
+        const ye = yTopX(xe) - tAt / 2;
         for (const c of clamexPositions(dd, S)) {
           sd.ops.push({ kind: 'clamex', face: 'binnen', u: sideU(D - c), v: sideV(ye), naam: 'Clamex' });
           top.ops.push({ kind: 'clamex', edge: sd.left ? 'u0' : 'u1', pos: dd - c, hoek: 90 - deg, naam: 'Clamex (schuin)' });
           count('Lamello Clamex P-14');
         }
       }
-      warnings.push(`Schuine top: beide uiteinden schuin zagen (${deg}°); de Clamex in de uiteinden staat onder ${r1(90 - deg)}° (Angle in de macro). Controleer de richting op het eerste stuk in woodWOP.`);
+      warnings.push(`Schuine top: beide uiteinden schuin zagen (${deg}°), zodat ze vlak tegen de zijwanden sluiten. Zaagmaat = lange kant. De Clamex in de uiteinden staat onder ${r1(90 - deg)}° (Angle in de macro); controleer de richting op het eerste stuk in woodWOP.`);
     }
   } else if (k.top === 'vol') {
     // Greeploos met een greeplijst bovenaan: de top stopt achter de greeplijst.
@@ -659,7 +663,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       // zodat de lucht achter de rug door de spleet tussen de dubbele bodem/regels kan.
       const yb = a === 0 ? (hasBodem && rugInBodemGroef ? t - (gd - gs) : verlOnder ? t + S.verluchtingSpleet : 0) : bounds[a].lo;
       const zRug = zBack + S.rugInsprong + gw / 2;
-      const ytTop = vb ? yTopZ(zRug) - t / cosA : lr ? Math.max(yTopX(t), yTopX(W - t)) - t / cosA : H;
+      // Schuine kast: de rug loopt door tot tegen de schuine bovenkant (de top stopt vóór de rug), zodat achteraan niets open staat.
+      const zRugAchter = zBack + S.rugInsprong + (gw - S.rug) / 2;
+      const ytTop = vb ? yTopZ(zRugAchter) : lr ? Math.max(yTopX(t), yTopX(W - t)) : H;
       const yt = b === last ? (verlBoven ? H - t - S.verluchtingSpleet : ytTop) : bounds[b + 1].hi;
       const label = segName(segments.length, idx);
       // Groef in de zijwanden alleen waar deze rug zit; onder- en bovenaan loopt hij uit de plaat.
@@ -672,7 +678,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         box: { x: t - (gd - gs), y: yb, z: zBack + S.rugInsprong + (gw - S.rug) / 2, w: W - 2 * t + 2 * (gd - gs), h: yt - yb, d: S.rug },
         uLen: W - 2 * t + 2 * (gd - gs), vLen: yt - yb,
       });
-      if (b === last) shapeTopLR(rugPart, x => yTopX(x) - t / cosA);
+      if (b === last) shapeTopLR(rugPart, x => yTopX(x));
     });
   } else if (k.rug === 'opgeschroefd') {
     segments.forEach(([a, b], idx) => {
@@ -1197,6 +1203,20 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           count('Schroef');
         }
       }
+    }
+  }
+
+  // Schuine kast: schroefgaten in de rug in de schuine top (langs de lijn waar de top tegen de rug komt).
+  const schuinTop = parts.find(x => x.id === 'top' && x.rol === 'schuin');
+  if (schuin && groef && schuinTop) {
+    const rug = parts.filter(x => x.rol === 'rug').sort((a, b) => (b.box.y + b.box.h) - (a.box.y + a.box.h))[0];
+    const tAt = t / cosA;
+    if (rug) for (const u of spreadPositions(W - 2 * t, S.rugSchroefAfstand, 50)) {
+      const x = t + u;
+      const y = (vb ? yTopZ(voorRug) : yTopX(x)) - tAt / 2;
+      if (y < rug.box.y || y > rug.box.y + rug.box.h) continue;
+      rug.ops.push({ kind: 'boring', face: 'achter', u: x - rug.box.x, v: y - rug.box.y, dia: S.schroefDia, diepte: S.rug, doorgaand: true, naam: 'Schroef' });
+      count('Schroef');
     }
   }
 
