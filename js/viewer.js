@@ -6,6 +6,7 @@ const COLORS = {
   front: 0xc8a57a,
   rug: 0xb99a6f,
   lade: 0xdcccaa,
+  trespa: 0x3a3a3a,
   selected: 0x3d8bd9,
 };
 
@@ -13,6 +14,30 @@ const COLORS = {
 function partColor(p) {
   if (p.kleur && /^#[0-9a-f]{6}$/i.test(p.kleur)) return parseInt(p.kleur.slice(1), 16);
   return COLORS[p.mat] ?? COLORS.korpus;
+}
+
+/** Prisma voor een paneel met een vorm (p.shape in u/v), rond het midden van zijn box. */
+function shapeGeometry(p) {
+  const b = p.box, c = [b.x + b.w / 2, b.y + b.h / 2, b.z + b.d / 2];
+  const side = p.rol === 'zijwand' || p.rol === 'stijl';
+  const at = ([u, v], e) => side ? [b.x + e - c[0], b.y + v - c[1], b.z + u - c[2]] : [b.x + u - c[0], b.y + v - c[1], b.z + e - c[2]];
+  const th = side ? b.w : b.d;
+  const pts = p.shape;
+  const pos = [];
+  const tri = (a, b2, c2) => pos.push(...a, ...b2, ...c2);
+  for (let i = 1; i + 1 < pts.length; i++) {
+    tri(at(pts[0], 0), at(pts[i + 1], 0), at(pts[i], 0));
+    tri(at(pts[0], th), at(pts[i], th), at(pts[i + 1], th));
+  }
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], n = pts[(i + 1) % pts.length];
+    tri(at(a, 0), at(n, 0), at(n, th));
+    tri(at(a, 0), at(n, th), at(a, th));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 class Viewer {
@@ -99,13 +124,14 @@ class Viewer {
       for (const p of cab.parts) cabBox.expandByPoint(new THREE.Vector3(p.box.x, p.box.y, p.box.z)).expandByPoint(new THREE.Vector3(p.box.x + p.box.w, p.box.y + p.box.h, p.box.z + p.box.d));
       const center = cabBox.getCenter(new THREE.Vector3());
       for (const p of cab.parts) {
-        const geo = new THREE.BoxGeometry(Math.max(p.box.w, 0.5), Math.max(p.box.h, 0.5), Math.max(p.box.d, 0.5));
+        const geo = p.shape ? shapeGeometry(p) : new THREE.BoxGeometry(Math.max(p.box.w, 0.5), Math.max(p.box.h, 0.5), Math.max(p.box.d, 0.5));
         const mat = new THREE.MeshLambertMaterial({ color: partColor(p) });
         const mesh = new THREE.Mesh(geo, mat);
         const pos = new THREE.Vector3(p.box.x + p.box.w / 2, p.box.y + p.box.h / 2, p.box.z + p.box.d / 2);
         mesh.userData = { part: p, cab: cab.key, base: pos.clone(), center };
         const dark = (partColor(p) >> 16 & 255) + (partColor(p) >> 8 & 255) + (partColor(p) & 255) < 200;
-        const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: dark ? 0x9a9a9a : 0x3a3226, transparent: true, opacity: 0.45 }));
+        if (p.tilt) mesh.rotation.set(p.tilt.x ?? 0, 0, p.tilt.z ?? 0);
+        const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: dark ? 0x9a9a9a : 0x3a3226, transparent: true, opacity: 0.45 }));
         mesh.add(lines);
         holder.add(mesh);
         this.items.push({ mesh, lines, part: p, cab: cab.key });

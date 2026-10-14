@@ -119,8 +119,22 @@ function mergeSettings(saved) {
     out.mpr.doorExtra = 3;
     out.migratieP110 = true;
   }
+  // Eenmalig (14-10-2026): voorste rij systeemboringen op 50 mm en zeker om de 150 mm een Clamex.
+  if (!saved.migratieRij50) {
+    if ((saved.systeemVoor ?? 37) === 37) out.systeemVoor = 50;
+    if ((out.clamexMaxAfstand ?? 400) > 150) out.clamexMaxAfstand = 150;
+    out.migratieRij50 = true;
+  }
+  // Blinde hoek: plaatje 22 mm van de kant (opgegeven 14-10-2026; voorlopige waarde was 20).
+  if ((saved.blindPlaatRand ?? 20) === 20) out.blindPlaatRand = 22;
+  // Ladebodem en -rug in 18 mm (aan de randen afgefreesd tot 16 mm).
+  if (saved.ladeBodemDikte === 16) out.ladeBodemDikte = 18;
   for (const serie of Object.keys(base.blum)) {
     out.blum[serie] = { ...base.blum[serie], ...(saved.blum?.[serie] ?? {}) };
+    // Oude standaard (2 gaten) vervangen door de gaten uit de P110-programma's.
+    if (String(out.blum[serie].gaten) === '37,261') out.blum[serie].gaten = base.blum[serie].gaten;
+    // Frontbevestiging per ladetype aanvullen uit de standaard (oude instellingen hebben die nog niet).
+    for (const ty of out.blum[serie].types ?? []) if (!ty.frontGaten) { const d = base.blum[serie].types?.find(x => x.code === ty.code); if (d?.frontGaten) ty.frontGaten = d.frontGaten; }
     if (!Array.isArray(out.blum[serie].types) || !out.blum[serie].types.length) out.blum[serie].types = base.blum[serie].types;
   }
   return out;
@@ -147,7 +161,7 @@ const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.p
  */
 function shareFile(blob, name) {
   const ext = name.split('.').pop().toLowerCase();
-  const types = { stk: 'application/octet-stream', csv: 'text/csv', zip: 'application/zip', json: 'application/json', mpr: 'text/plain',
+  const types = { pdf: 'application/pdf', stk: 'application/octet-stream', csv: 'text/csv', zip: 'application/zip', json: 'application/json', mpr: 'text/plain',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   // Als bestand (niet als tekst in een tabblad) laten opslaan.
   const fileBlob = new Blob([blob], { type: ['csv', 'mpr', 'stk'].includes(ext) ? 'application/octet-stream' : (types[ext] ?? blob.type) });

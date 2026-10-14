@@ -3,15 +3,15 @@
 // Methode: guillotine-schikking (vrije rechthoeken, "best short side fit", splitsen langs de kortste rest).
 // Plaatcoördinaten: X langs de lengte van de plaat (= nerf), Y langs de breedte.
 
-const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, zaagsnede: 4, randafzaag: 10 };
+const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, trespaLengte: 3050, trespaBreedte: 1530, zaagsnede: 4, randafzaag: 10 };
 // Naam van het plaattype in de platendatabank van HPO (Schelling-zaag): {decor} en {dikte} worden ingevuld.
-const HPO_DEFAULTS = { hpoMelamine: 'MEL_{decor}_{dikte}', hpoHpl: 'OPG_{decor}_{dikte}' };
+const HPO_DEFAULTS = { hpoMelamine: 'MEL_{decor}_{dikte}', hpoHpl: 'OPG_{decor}_{dikte}', hpoTrespa: 'TRESPA_{dikte}' };
 
 /** Plaatmaat volgens het plaattype: HPL heeft een eigen standaardformaat. */
 function sheetSize(N, plaattype) {
-  return plaattype === 'HPL'
-    ? { ...N, plaatLengte: N.hplLengte, plaatBreedte: N.hplBreedte }
-    : N;
+  if (plaattype === 'HPL') return { ...N, plaatLengte: N.hplLengte, plaatBreedte: N.hplBreedte };
+  if (plaattype === 'Trespa') return { ...N, plaatLengte: N.trespaLengte ?? 3050, plaatBreedte: N.trespaBreedte ?? 1530 };
+  return N;
 }
 
 /** Houtdecor: nerf moet in de lengte van de plaat blijven (niet draaien). */
@@ -37,7 +37,7 @@ function nestingItems(project, S, labelOf, kerf = 0) {
     if (res.error) { offset += W; continue; }
     const mode = k.houtDoorlopend ?? 'nee';
     if (mode !== 'vorige' || !current) current = null;
-    for (const p of res.parts) {
+    for (const p of sawParts(res.parts, S)) {
       const c = cutInfo(p);
       const key = labelOf(p);
       const wood = isWoodDecor(p.decor, S.decors);
