@@ -63,6 +63,7 @@ const DEFAULT_SETTINGS = {
   demperDia: 5,
   demperDiepte: 12,
   demperRand: 7,
+  scharnierInbouw: 60,      // schuine kast: zo ver steekt het scharnier (plaatje + arm) de kast in
   scharnierRand: 65,       // eerste en laatste scharnier vanaf boven- en onderkant
   potDeuvels: true,        // twee deuvelgaten bij de pot (boorbeeld 45/9,5)
   systeemboringen: true,
@@ -333,6 +334,11 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   }
   const preWarnings = [];
   if (autoPunt) preWarnings.push(`Met ${r1(hoekIn * 180 / Math.PI)}° komt de lage kant op 0 mm: de kast is als punt gemaakt (in verstek).`);
+  // Trapkast: de deur scharniert altijd aan de hoge kant (één deur).
+  if (lr) {
+    if (k.deuren === '2' || (k.deuren === 'auto' && W > S.deurMaxBreedte)) preWarnings.push(`Schuine kast: één deur, scharnierend aan de hoge kant${W > S.deurMaxBreedte ? ` (breder dan ${S.deurMaxBreedte} mm: controleer het aantal scharnieren en het gewicht)` : ''}.`);
+    k = { ...k, deuren: '1', scharnierKant: rechtsHoog ? 'rechts' : 'links' };
+  }
   if (punt) {
     if (k.secties?.length > 1 || k.secties?.some(x => x.type !== 'deur' && x.type !== 'open')) preWarnings.push('Spitse kast: gebruik één vak met een deur (of open); andere vakken worden niet juist gemaakt.');
     if (k.secties?.some(x => Number(x.legplanken) > 0)) preWarnings.push('Spitse kast: geen losse legplanken (aan de punt is er niets om op te steunen).');
@@ -1007,7 +1013,10 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           // Scharnieren gelijk verdeeld, maar altijd binnen het korpus (ook als de deur uitsteekt).
           const pMin = Math.max(S.scharnierRand, -Pv + S.scharnierRand - door.box.y);
           const hingeEdgeH = door.edgeH ? (hingeLeft ? door.edgeH.u0 : door.edgeH.u1) : door.vLen;
-          const pMax = Math.min(hingeEdgeH - S.scharnierRand, (lr ? Math.min(yTopX(t), yTopX(W - t)) : H) - S.scharnierRand - door.box.y);
+          // Schuine kast: de scharnieren zitten aan de hoge kant. Het scharnier (plaatje + arm) steekt tot
+          // scharnierInbouw de kast in; daar moet het nog onder de schuine top passen, met scharnierVrij ruimte.
+          const slopeLimit = lr ? yTopX(hingeLeft ? t + S.scharnierInbouw : W - t - S.scharnierInbouw) - t / cosA - S.scharnierVrij : Infinity;
+          const pMax = Math.min(hingeEdgeH - S.scharnierRand, (lr ? slopeLimit - S.plaatjeHoogte / 2 : H - S.scharnierRand) - door.box.y);
           let positions = Array.from({ length: hc }, (_, j) => pMin + j * (pMax - pMin) / (hc - 1));
           // Met een rijboring in dit vak: het scharnier zo verschuiven dat de gaten van het plaatje op het raster
           // van 32 mm vallen (dezelfde gaten als de rijboring, geen overlappende gaten).
@@ -1025,7 +1034,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           const obstacles = parts.filter(x => (x.rol === 'liggend' || x.rol === 'greeplijst') && x.box.z + x.box.d > D - 60)
             .map(x => [x.box.y - S.scharnierVrij, x.box.y + x.box.h + S.scharnierVrij]);
           const half = S.plaatjeHoogte / 2;
-          const blocked = c => obstacles.some(([a, b]) => c + half > a && c - half < b) || c - half < -Pv || c + half > H;
+          const blocked = c => obstacles.some(([a, b]) => c + half > a && c - half < b) || c - half < -Pv || c + half > Math.min(H, slopeLimit);
           positions = positions.map((pv, j) => {
             const dir = j < positions.length / 2 ? 1 : -1;
             for (let step = 0; step <= 12; step++) {
