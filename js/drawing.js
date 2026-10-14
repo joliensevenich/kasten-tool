@@ -245,7 +245,7 @@ function drawCabinetOverview(doc, k, res, meta) {
   // Werkelijke omtrek van een stuk in een aanzicht: vorm (schuine kast) of gekantelde top; anders null (rechthoek).
   const poly = (p, view) => {
     const b = p.box, side = p.rol === 'zijwand' || p.rol === 'stijl';
-    if (p.shape && view === 'voor' && !side) return p.shape.map(([u, v]) => [b.x + u, b.y + v]);
+    if (p.shape && !p.shape3d && view === 'voor' && !side) return p.shape.map(([u, v]) => [b.x + u, b.y + v]);
     if (p.shape && view === 'zij' && side) return p.shape.map(([u, v]) => [b.z + u, b.y + v]);
     if (p.shape3d?.plane === 'xy' && view === 'voor') return p.shape3d.pts.map(([u, v]) => [b.x + u, b.y + v]);
     if (p.shape3d?.plane === 'zy' && view === 'zij') return p.shape3d.pts.map(([u, v]) => [b.z + u, b.y + v]);

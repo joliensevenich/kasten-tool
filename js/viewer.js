@@ -19,7 +19,7 @@ function partColor(p) {
 /** Prisma voor een paneel met een vorm (p.shape in u/v), rond het midden van zijn box. */
 function shapeGeometry(p) {
   const b = p.box, c = [b.x + b.w / 2, b.y + b.h / 2, b.z + b.d / 2];
-  const side = p.rol === 'zijwand' || p.rol === 'stijl' || p.shape3d?.plane === 'zy';
+  const side = p.shape3d ? p.shape3d.plane === 'zy' : (p.rol === 'zijwand' || p.rol === 'stijl');
   const at = ([u, v], e) => side ? [b.x + e - c[0], b.y + v - c[1], b.z + u - c[2]] : [b.x + u - c[0], b.y + v - c[1], b.z + e - c[2]];
   const th = side ? b.w : b.d;
   const pts = p.shape3d?.pts ?? p.shape;

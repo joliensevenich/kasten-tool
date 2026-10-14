@@ -361,12 +361,18 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   const sideH = H + Pv;
   const side = left => {
     // Schuin over de breedte: elke zijwand zo hoog als de bovenkant aan zijn binnenkant.
-    const hS = lr ? yTopX(left ? t : W - t) + Pv : sideH;
+    // Trapkast: zijwand en top in verstek; de zijwand is aan de buitenkant zo hoog als de schuine bovenkant (lange punt).
+    const hS = lr ? yTopX(left ? 0 : W) + Pv : sideH;
     const p = add({
       id: left ? 'zij-l' : 'zij-r', naam: left ? 'Zijwand links' : 'Zijwand rechts', rol: 'zijwand', mat: 'korpus', dikte: t,
       box: { x: left ? 0 : W - t, y: -Pv, z: zBack, w: t, h: hS, d: Dk },
       uLen: Dk, vLen: hS, grain: 'v', edges: { u0: S.bandKorpus, u1: S.bandKorpus, v0: S.bandKorpus, v1: S.bandKorpus }, left, zicht: left ? !!k.zichtL : !!k.zichtR,
     });
+    if (lr) {
+      const hIn = yTopX(left ? t : W - t) - t / cosA + Pv;  // binnenkant: onderkant van de top
+      p.vInner = hIn;
+      p.shape3d = { plane: 'xy', pts: left ? [[0, 0], [t, 0], [t, hIn], [0, hS]] : [[0, 0], [t, 0], [t, hS], [0, hIn]] };
+    }
     if (vb) {
       // Schuin over de diepte: trapezium (voor hoog, achter laag); de schuine kant wordt op de CNC gefreesd.
       const vB = yTopZ(zBack) + Pv;
@@ -573,22 +579,24 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       }
       warnings.push(`Schuine top: voor- en achterkant schuin zagen (${deg}°), zodat de voorkant verticaal staat en de achterkant tegen de rug sluit. Zaagmaat = lange kant.`);
     } else {
-      const dd = D - voorRug, Ls = (W - 2 * t) / cosA;
-      const yL = yTopX(t), yR = yTopX(W - t);
-      const yMin = Math.min(yL, yR) - tAt, yMax = Math.max(yL, yR);
-      const top = tilted({ box: { x: t, y: yMin, z: voorRug, w: W - 2 * t, h: yMax - yMin, d: dd },
-        shape3d: { plane: 'xy', pts: [[0, yL - tAt - yMin], [W - 2 * t, yR - tAt - yMin], [W - 2 * t, yR - yMin], [0, yL - yMin]] }, uLen: Ls + over, vLen: dd });
-      // Uiteinden schuin gezaagd; Clamex in de zijwand en (onder de hoek van de trap) in het schuine uiteinde van de top.
+      // Trapkast: de top loopt tot over de buitenkant van de zijwanden en sluit er in verstek op aan.
+      const dd = D - voorRug, Ls = W / cosA;
+      const y0 = yTopX(0), yW = yTopX(W), yi0 = yTopX(t) - tAt, yiW = yTopX(W - t) - tAt;
+      const yMin = Math.min(yi0, yiW), yMax = Math.max(y0, yW);
+      const top = tilted({ box: { x: 0, y: yMin, z: voorRug, w: W, h: yMax - yMin, d: dd },
+        shape3d: { plane: 'xy', pts: [[t, yi0 - yMin], [W - t, yiW - yMin], [W, yW - yMin], [0, y0 - yMin]] }, uLen: Ls, vLen: dd });
+      // Verstekhoek per kant: de hoek tussen zijwand en top, elk stuk de helft.
+      const joint = left => ((left !== rechtsHoog) ? 90 - deg : 90 + deg);
       for (const sd of sides) {
-        const xe = sd.left ? t : W - t;
-        const ye = yTopX(xe) - tAt / 2;
+        const half = r1(joint(sd.left) / 2);
         for (const c of clamexPositions(dd, S)) {
-          sd.ops.push({ kind: 'clamex', face: 'binnen', u: sideU(D - c), v: sideV(ye), naam: 'Clamex' });
-          top.ops.push({ kind: 'clamex', edge: sd.left ? 'u0' : 'u1', pos: dd - c, hoek: 90 - deg, naam: 'Clamex (schuin)' });
+          sd.ops.push({ kind: 'clamex', edge: 'v1', pos: sideU(D - c), hoek: half, naam: 'Clamex (verstek)' });
+          top.ops.push({ kind: 'clamex', edge: sd.left ? 'u0' : 'u1', pos: dd - c, hoek: half, naam: 'Clamex (verstek)' });
           count('Lamello Clamex P-14');
         }
       }
-      warnings.push(`Schuine top: beide uiteinden schuin zagen (${deg}°), zodat ze vlak tegen de zijwanden sluiten. Zaagmaat = lange kant. De Clamex in de uiteinden staat onder ${r1(90 - deg)}° (Angle in de macro); controleer de richting op het eerste stuk in woodWOP.`);
+      const hoog = rechtsHoog ? 'rechts' : 'links', laag = rechtsHoog ? 'links' : 'rechts';
+      warnings.push(`Trapkast in verstek: zijwand ${hoog} en top aan die kant op ${r1(joint(!rechtsHoog) / 2)}° zagen, zijwand ${laag} en top aan die kant op ${r1(joint(rechtsHoog) / 2)}° (lange punt aan de buitenkant). Clamex in beide verstekvlakken onder dezelfde hoek (Angle in de macro); controleer de richting op het eerste stuk in woodWOP.`);
     }
   } else if (k.top === 'vol') {
     // Greeploos met een greeplijst bovenaan: de top stopt achter de greeplijst.
@@ -1224,7 +1232,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   if (schuin) {
     let dropped = 0;
     for (const p of parts) {
-      const topAt = p.shape ? (u => p.shape[3][1] + (p.shape[2][1] - p.shape[3][1]) * u / p.uLen) : p.rol === 'zijwand' ? (() => p.vLen) : null;
+      const topAt = p.shape ? (u => p.shape[3][1] + (p.shape[2][1] - p.shape[3][1]) * u / p.uLen) : p.rol === 'zijwand' ? (() => p.vInner ?? p.vLen) : null;
       if (!topAt) continue;
       p.ops = p.ops.filter(o => {
         if (o.kind === 'contour' || o.edge || o.u == null) return true;
