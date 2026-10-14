@@ -838,23 +838,37 @@ const stkNum = (v, n) => String(Math.max(0, Math.round(Number(v) || 0))).slice(-
 const stkMm = mmValue => stkNum(Math.round(Number(mmValue) * 1000), 8);
 const stkLine = fields => fields.join(' ');
 
-/** Plaattype zoals in de platendatabank van HPO: decorcode, met " HPL" voor HPL. */
-const stkBoardType = r => `${r.decor}${(r.plaattype ?? 'Melamine') === 'HPL' ? ' HPL' : ''}`;
+/** Plaattype zoals in de platendatabank van HPO, volgens het sjabloon in de instellingen (bv. MEL_{decor}_{dikte} → MEL_W980_18). */
+const stkBoardType = r => {
+  const N = { ...HPO_DEFAULTS, ...(S().nest ?? {}) };
+  const tpl = (r.plaattype ?? 'Melamine') === 'HPL' ? N.hpoHpl : N.hpoMelamine;
+  return String(tpl || '{decor}').replace(/\{decor\}/gi, r.decor ?? '').replace(/\{dikte\}/gi, String(Math.round(Number(r.dikte) * 10) / 10));
+};
 
 /** Naam van de stuklijst: tevens de bestandsnaam, hoogstens 20 tekens, zonder verboden tekens. */
 const stkName = project => (project.naam || 'Stuklijst').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 20) || 'Stuklijst';
 
+const STK_GUID = '{00000000-0000-0000-0000-000000000000}';
+
+/** Tekst als UTF-16 LE met BOM, zoals HPO zelf zijn .stk-bestanden schrijft. */
+function utf16le(text) {
+  const bytes = new Uint8Array(2 + text.length * 2);
+  bytes[0] = 0xff; bytes[1] = 0xfe;
+  for (let i = 0; i < text.length; i++) { const c = text.charCodeAt(i); bytes[2 + i * 2] = c & 255; bytes[3 + i * 2] = c >> 8; }
+  return bytes;
+}
+
+// Opbouw overgenomen van stuklijsten die HPO zelf exporteerde (voorbeelden/stk): L01, L06, per onderdeel F01 + F06 + F09 + F80, L$.
 function cutListStk(project, rows) {
   const today = new Date();
   const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const name = stkName(project);
   const lines = [];
   // L01: kopregel van de stuklijst.
-  // (Volgens de specificatie staat het wisvlag op positie 98: de originele ordernaam beslaat daarom 21 posities.)
-  lines.push(stkLine(['L', '01', stkText(name, 20), stkText(project.naam, 20), date, date, '0', '0', '0', stkText('', 21), '0']));
-  // L06: databanken gebruiken (platen, kanten, ...), standaard stapelparameters.
-  lines.push(stkLine(['L', '06', stkText('', 20), '1', '1', '1', '1', '1', '1', '1', '1', '1', stkText('', 20)]));
+  lines.push(stkLine(['L', '01', stkText(name, 20), stkText('', 20), date, date, '0', '0', '2', stkText('', 20), '0']));
+  // L06: databanken gebruiken (platen, kanten, ...).
+  lines.push(stkLine(['L', '06', stkText('', 20), '1', '1', '1', '1', '1', '1', '0', '0', '0', stkText('', 20)]));
   rows.forEach((r, i) => {
     const nr = i + 1;
     const wood = isWoodDecor(r.decor, S().decors);
@@ -863,40 +877,43 @@ function cutListStk(project, rows) {
     lines.push(stkLine([
       'F', '01',
       stkNum(nr, 4),                 // volgnummer
-      stkNum(0, 4),                  // gecombineerd nummer (0 in een niet geoptimaliseerde stuklijst)
+      stkNum(0, 4),                  // gecombineerd nummer
       '0',                           // categorie: normaal stuk
       stkNum(r.aantal, 6),           // aantal besteld
-      stkNum(0, 6),                  // aantal geoptimaliseerd
-      stkText(stkBoardType(r), 20),  // plaattype
+      stkNum(r.aantal, 6),           // aantal geoptimaliseerd
+      stkText(stkBoardType(r), 20),  // plaattype (moet bestaan in de platendatabank van HPO)
       stkMm(r.dikte),                // plaatdikte
       stkMm(r.L), stkMm(r.B),        // zaagmaat A en B
       stkMm(r.L), stkMm(r.B),        // eindmaat A en B
-      stkText(`${r.kast} ${r.naam}`, 20), // omschrijving
-      wood ? '0' : '1',              // draaibaar: houtdecor niet (nerf langs A), unikleur wel
-      '9', '9',                      // prioriteit (verplicht), kwaliteit
+      stkText(`${r.kast}_${r.naam}`, 20), // omschrijving
+      wood ? '0' : '2',              // draaien: houtdecor niet (nerf langs A), unikleur wel
+      '9', '9',                      // prioriteit, kwaliteit
       '0',                           // alleen gedraaid gebruiken: nee
       stkNum(0, 2),                  // groep
       stkNum(0, 6), stkNum(0, 3),    // overlevering stuks / %
       stkNum(0, 6), stkNum(0, 3),    // onderlevering stuks / %
       '1', '0',                      // optimaliseren: ja; klein onderdeel: nee
-      stkText(r.kast, 20),           // positienummer extern (kast)
-      stkText(r.naam, 20),           // regelnummer extern (onderdeel)
+      stkText('', 20),               // positienummer extern (NC-programma)
+      stkText('', 20),               // regelnummer extern (2e NC-programma)
       stkText(bands ? `Band ${bands}` : '', 40), // bewerkingsnotitie: kantenband
       '1', '0',                      // etiket afdrukken: ja; paklijst: nee
-      stkText('', 20),               // bronbouwgroep
+      stkText(r.kast, 20),           // bronbouwgroep (kast)
       stkText(name, 20),             // bronstuklijst
       stkNum(nr, 9),                 // nummer in de stuklijst
       date,                          // leverdatum
-      '0', '1',                      // oriëntatie in de strook: vrij; status: handmatig ingevoerd
+      '0', '0',                      // oriëntatie in de strook; status
       stkNum(0, 3), stkNum(0, 2), stkNum(0, 2), // intern, maatvermenigvuldiger A en B
-      stkNum(0, 7),                  // aantalcorrectie
+      ' ' + stkNum(0, 6),            // aantalcorrectie (met tekenpositie)
       '1', stkNum(0, 8),             // toegestaan in 3e fase; max. afval 3e fase
       stkNum(0, 4), stkNum(0, 8),    // frontpatroon, primaire sleutel
-      '0', '0',                      // kanten combineren: ja; omkeren: nee
+      '0', STK_GUID, STK_GUID, STK_GUID, '0',
     ]));
+    lines.push(`F 06 1${' '.repeat(22)}01 001 01${' '.repeat(85)}0`);
+    lines.push('F 09 00000000 00000000 00000000 00000000 XXXX');
+    lines.push(`F 80 00000000 00000000 00000000 00000000 0000 ${' '.repeat(83)} 00 00 00 00 00000000 00000000 ${' '.repeat(41)}`);
   });
   lines.push('L$');
-  return { blob: new Blob([lines.join('\r\n') + '\r\n'], { type: 'application/octet-stream' }), name: `${name}.stk` };
+  return { blob: new Blob([utf16le(lines.join('\r\n') + '\r\n')], { type: 'application/octet-stream' }), name: `${name}.stk` };
 }
 
 function cutListXlsx(project, rows, hardware, bands) {
@@ -1189,9 +1206,11 @@ const SettingsView = {
           ${row('HPL: plaatbreedte', numHTML('nz-hplBreedte', s.nest.hplBreedte))}
           ${row('Zaagsnede', numHTML('nz-zaagsnede', s.nest.zaagsnede))}
           ${row('Randafzaag', numHTML('nz-randafzaag', s.nest.randafzaag))}
+          <div class="row"><span class="row-label">HPO-plaattype melamine</span><div class="row-fill"><input class="input-plain" id="nz-hpoMelamine" value="${esc(s.nest.hpoMelamine ?? HPO_DEFAULTS.hpoMelamine)}"></div></div>
+          <div class="row"><span class="row-label">HPO-plaattype HPL</span><div class="row-fill"><input class="input-plain" id="nz-hpoHpl" value="${esc(s.nest.hpoHpl ?? HPO_DEFAULTS.hpoHpl)}"></div></div>
           ${row('CSV: scheidingsteken', selectHTML('nz-csvScheiding', [[';', 'Puntkomma ;'], [',', 'Komma ,'], ['\t', 'Tab']], s.nest.csvScheiding ?? ';'))}
           ${row('CSV: decimaalteken', selectHTML('nz-csvDecimaal', [['.', 'Punt (12.5)'], [',', 'Komma (12,5)']], s.nest.csvDecimaal ?? '.'))}
-        </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde.</div></div>
+        </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde. HPO-plaattype: de naam van de plaat in de platendatabank van de zaag, {decor} en {dikte} worden ingevuld (MEL_{decor}_{dikte} → MEL_W980_18). Die naam moet exact bestaan in HPO.</div></div>
         <div class="group"><div class="group-header">Machine (woodWOP)</div><div class="group-body">
           <div class="row"><span class="row-label">Frees voor uitsparingen</span><div class="row-fill"><input class="input-num" id="mp-freesContour" value="${esc(s.mpr.freesContour)}"></div></div>
           <div class="row"><span class="row-label">Kleine frees</span><div class="row-fill"><input class="input-num" id="mp-freesKlein" value="${esc(s.mpr.freesKlein)}"></div></div>
@@ -1237,6 +1256,7 @@ const SettingsView = {
     for (const key of ['decorKorpus', 'decorFront']) bindDecor($(`#st-${key}`, v), val => { s[key] = val; Store.save(); this.render(); });
     for (const key of Object.keys(NEST_DEFAULTS)) $(`#nz-${key}`, v)?.addEventListener('change', e => { if (e.target.value !== '') { s.nest[key] = Number(e.target.value); Store.save(); } });
     for (const key of ['csvScheiding', 'csvDecimaal']) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value; Store.save(); });
+    for (const key of Object.keys(HPO_DEFAULTS)) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value.trim() || HPO_DEFAULTS[key]; Store.save(); });
     for (const key of Object.keys(MPR_DEFAULTS)) {
       $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'clamex' ? e.target.checked : key === 'doorExtra' ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });
     }

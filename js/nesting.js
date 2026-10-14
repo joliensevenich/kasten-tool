@@ -4,6 +4,8 @@
 // Plaatcoördinaten: X langs de lengte van de plaat (= nerf), Y langs de breedte.
 
 const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, zaagsnede: 4, randafzaag: 10 };
+// Naam van het plaattype in de platendatabank van HPO (Schelling-zaag): {decor} en {dikte} worden ingevuld.
+const HPO_DEFAULTS = { hpoMelamine: 'MEL_{decor}_{dikte}', hpoHpl: 'OPG_{decor}_{dikte}' };
 
 /** Plaatmaat volgens het plaattype: HPL heeft een eigen standaardformaat. */
 function sheetSize(N, plaattype) {
