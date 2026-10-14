@@ -309,8 +309,11 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // Schuine kast (onder een trap of een schuin dak): H is de hoogte aan de hoge kant, de hoek bepaalt de lage kant.
   const sch = k.schuin ?? {};
   // Spits toelopend (trapkast tot 0 mm): de hoek volgt uit hoogte en breedte; geen zijwand aan de lage kant.
-  const punt = sch.richting === 'lr' && sch.laag === 'punt';
-  const sa = punt ? Math.atan(H / W) : (Number(sch.hoek) || 0) * Math.PI / 180;
+  // Ook automatisch als de ingegeven hoek de lage kant (bijna) op 0 mm brengt.
+  const hoekIn = (Number(sch.hoek) || 0) * Math.PI / 180;
+  const autoPunt = sch.richting === 'lr' && sch.laag !== 'punt' && hoekIn > 0 && Math.abs(H - W * Math.tan(hoekIn)) <= 5;
+  const punt = sch.richting === 'lr' && (sch.laag === 'punt' || autoPunt);
+  const sa = punt ? Math.atan(H / W) : hoekIn;
   const lr = sch.richting === 'lr' && sa > 0, vb = sch.richting === 'vb' && sa > 0;
   const schuin = lr || vb;
   const tanA = Math.tan(sa), cosA = Math.cos(sa), sinA = Math.sin(sa);
@@ -320,10 +323,16 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   if (schuin) {
     if (sa >= Math.PI / 3) return { parts: [], warnings: [], hardware: [], zones: [], error: 'De hoek is te groot (maximaal 60°).' };
     const laag = lr ? H - W * tanA : H - D * tanA;
-    if (laag < 150 && !punt) return { parts: [], warnings: [], hardware: [], zones: [], error: `Aan de lage kant is de kast maar ${Math.round(laag)} mm hoog. Kies een kleinere hoek of een hogere kast.` };
+    if (laag < 150 && !punt) {
+      const maxHoek = Math.atan(H / W) * 180 / Math.PI;
+      return { parts: [], warnings: [], hardware: [], zones: [], error: laag < 0
+        ? `Met ${r1(sa * 180 / Math.PI)}° raakt de schuine kant de bodem al vóór de lage kant. Bij ${W} breed en ${H} hoog loopt de kast tot een punt bij ${r1(maxHoek)}°: kies Lage kant "Punt" of een kleinere hoek.`
+        : `Aan de lage kant is de kast maar ${Math.round(laag)} mm hoog; een zijwand past daar niet. Kies Lage kant "Punt" (dan wordt de hoek ${r1(maxHoek)}°), een kleinere hoek of een hogere kast.` };
+    }
     if (k.top !== 'vol') k = { ...k, top: 'vol' };       // een schuine kast heeft altijd een (schuine) volle top
   }
   const preWarnings = [];
+  if (autoPunt) preWarnings.push(`Met ${r1(hoekIn * 180 / Math.PI)}° komt de lage kant op 0 mm: de kast is als punt gemaakt (in verstek).`);
   if (punt) {
     if (k.secties?.length > 1 || k.secties?.some(x => x.type !== 'deur' && x.type !== 'open')) preWarnings.push('Spitse kast: gebruik één vak met een deur (of open); andere vakken worden niet juist gemaakt.');
     if (k.secties?.some(x => Number(x.legplanken) > 0)) preWarnings.push('Spitse kast: geen losse legplanken (aan de punt is er niets om op te steunen).');
