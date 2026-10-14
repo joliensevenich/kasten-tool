@@ -320,7 +320,10 @@ function openCabinet(project, k, selectId = null) {
           <div class="row"><span class="row-label">Trespa onder de plint (${S().trespaDikte} mm)</span>${toggleHTML('f-plintTrespa', k.plintTrespa)}</div></div>
         ${row('Plaatdikte korpus', numHTML('f-plaatDikte', k.plaatDikte, `${S().plaat} (standaard)`))}
         ${row('Schuine kast', selectHTML('f-schuin', [['geen', 'Nee'], ['lr', 'Schuin links-rechts (trap)'], ['vb', 'Schuin voor-achter (dak)']], k.schuin?.richting ?? 'geen'))}
-        ${(k.schuin?.richting ?? 'geen') !== 'geen' ? `${row('Hoek (graden)', numHTML('f-schuinHoek', k.schuin?.hoek, '°'))}
+        ${(k.schuin?.richting ?? 'geen') !== 'geen' ? `${k.schuin.richting === 'lr' ? row('Lage kant', selectHTML('f-schuinLaag', [['zijwand', 'Met zijwand'], ['punt', 'Punt (0 mm, in verstek)']], k.schuin?.laag ?? 'zijwand')) : ''}
+          ${k.schuin.richting === 'lr' && k.schuin.laag === 'punt'
+            ? `<div class="row"><span class="row-label">Hoek</span><span class="row-value num" id="f-schuinHoekInfo">${Number(k.breedte) > 0 && Number(k.hoogte) > 0 ? `${(Math.atan(Number(k.hoogte) / Number(k.breedte)) * 180 / Math.PI).toFixed(1).replace('.', ',')}° (uit hoogte en breedte)` : 'uit hoogte en breedte'}</span></div>`
+            : row('Hoek (graden)', numHTML('f-schuinHoek', k.schuin?.hoek, '°'))}
           ${k.schuin.richting === 'lr' ? row('Hoge kant', selectHTML('f-schuinHoog', [['links', 'Links'], ['rechts', 'Rechts']], k.schuin?.hoog ?? 'links')) : ''}
           <div class="row"><span class="row-sub">De hoogte hierboven is de hoogte aan de hoge kant${k.schuin.richting === 'vb' ? ' (vooraan)' : ''}. De top loopt schuin; ${k.schuin.richting === 'lr' ? 'fronten en rug lopen bovenaan schuin mee en worden op de P110 schuin gezaagd' : 'de zijwanden worden op de P110 schuin gezaagd'}.</span></div>` : ''}
         ${(k.schuin?.richting ?? 'geen') === 'geen' ? row('Bovenkant', selectHTML('f-top', OPTIONS.top, k.top)) : ''}
@@ -386,6 +389,7 @@ function openCabinet(project, k, selectId = null) {
     $('#f-schuin', form)?.addEventListener('change', e => { k.schuin = { hoek: 30, hoog: 'links', ...(k.schuin ?? {}), richting: e.target.value }; renderForm(); update(); });
     $('#f-schuinHoek', form)?.addEventListener('input', e => { k.schuin = { ...(k.schuin ?? {}), hoek: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     $('#f-schuinHoog', form)?.addEventListener('change', e => { k.schuin = { ...(k.schuin ?? {}), hoog: e.target.value }; update(); });
+    $('#f-schuinLaag', form)?.addEventListener('change', e => { k.schuin = { ...(k.schuin ?? {}), laag: e.target.value }; renderForm(); update(); });
     bindVal('f-code', 'code');
     $('#f-code', form).addEventListener('change', () => sheet.setTitle(`${k.code} · ${PRESETS.find(x => x.id === k.type)?.naam ?? ''}`));
     ['breedte', 'hoogte', 'diepte', 'plintHoogte', 'blindBreedte', 'plaatDikte', 'rugDikte', 'uitstekOnder', 'uitstekBoven', 'greepHart'].forEach(key => bindVal('f-' + key, key, 'num'));

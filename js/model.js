@@ -308,7 +308,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   if (!(W > 0 && H > 0 && D > 0)) return { parts: [], warnings: [], hardware: [], zones: [], error: 'Vul breedte, hoogte en diepte in.' };
   // Schuine kast (onder een trap of een schuin dak): H is de hoogte aan de hoge kant, de hoek bepaalt de lage kant.
   const sch = k.schuin ?? {};
-  const sa = (Number(sch.hoek) || 0) * Math.PI / 180;
+  // Spits toelopend (trapkast tot 0 mm): de hoek volgt uit hoogte en breedte; geen zijwand aan de lage kant.
+  const punt = sch.richting === 'lr' && sch.laag === 'punt';
+  const sa = punt ? Math.atan(H / W) : (Number(sch.hoek) || 0) * Math.PI / 180;
   const lr = sch.richting === 'lr' && sa > 0, vb = sch.richting === 'vb' && sa > 0;
   const schuin = lr || vb;
   const tanA = Math.tan(sa), cosA = Math.cos(sa), sinA = Math.sin(sa);
@@ -318,14 +320,20 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   if (schuin) {
     if (sa >= Math.PI / 3) return { parts: [], warnings: [], hardware: [], zones: [], error: 'De hoek is te groot (maximaal 60°).' };
     const laag = lr ? H - W * tanA : H - D * tanA;
-    if (laag < 150) return { parts: [], warnings: [], hardware: [], zones: [], error: `Aan de lage kant is de kast maar ${Math.round(laag)} mm hoog. Kies een kleinere hoek of een hogere kast.` };
+    if (laag < 150 && !punt) return { parts: [], warnings: [], hardware: [], zones: [], error: `Aan de lage kant is de kast maar ${Math.round(laag)} mm hoog. Kies een kleinere hoek of een hogere kast.` };
     if (k.top !== 'vol') k = { ...k, top: 'vol' };       // een schuine kast heeft altijd een (schuine) volle top
+  }
+  const preWarnings = [];
+  if (punt) {
+    if (k.secties?.length > 1 || k.secties?.some(x => x.type !== 'deur' && x.type !== 'open')) preWarnings.push('Spitse kast: gebruik één vak met een deur (of open); andere vakken worden niet juist gemaakt.');
+    if (k.secties?.some(x => Number(x.legplanken) > 0)) preWarnings.push('Spitse kast: geen losse legplanken (aan de punt is er niets om op te steunen).');
+    k = { ...k, deuren: '1', scharnierKant: rechtsHoog ? 'rechts' : 'links', blindBreedte: 0, secties: (k.secties ?? []).map(x => ({ ...x, legplanken: 0 })) };
   }
 
   const t = S.plaat;
   const v = S.voeg;
   const fd = S.front;
-  const warnings = [];
+  const warnings = [...preWarnings];
   const parts = [];
   const hw = {};
   const count = (name, n = 1) => { hw[name] = (hw[name] ?? 0) + n; };
@@ -394,7 +402,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const yL = Math.min(y1, topAt(p.box.x)), yR = Math.min(y1, topAt(p.box.x + p.box.w));
     if (yL >= y1 - 0.1 && yR >= y1 - 0.1) return;
     const hl = yL - p.box.y, hr = yR - p.box.y, top = Math.max(hl, hr);
-    if (Math.min(hl, hr) < 40) warnings.push(`${p.naam}: aan de lage kant maar ${Math.round(Math.min(hl, hr))} mm hoog.`);
+    if (Math.min(hl, hr) < 40 && !punt) warnings.push(`${p.naam}: aan de lage kant maar ${Math.round(Math.min(hl, hr))} mm hoog.`);
     p.box.h = top; p.vLen = top;
     p.shape = [[0, 0], [p.uLen, 0], [p.uLen, hr], [0, hl]];
     p.edgeH = { u0: hl, u1: hr };
@@ -688,6 +696,13 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         box: { x: t - (gd - gs), y: yb, z: zBack + S.rugInsprong + (gw - S.rug) / 2, w: W - 2 * t + 2 * (gd - gs), h: yt - yb, d: S.rug },
         uLen: W - 2 * t + 2 * (gd - gs), vLen: yt - yb,
       });
+      if (punt && b === last) {
+        // De rug stopt waar zijn schuine bovenkant de bodem raakt.
+        const reach = (H - t / cosA + (gd - gs)) / tanA;
+        const x0 = rugPart.box.x, x1 = x0 + rugPart.box.w;
+        const nx0 = rechtsHoog ? Math.max(x0, W - reach) : x0, nx1 = rechtsHoog ? x1 : Math.min(x1, reach);
+        rugPart.box.x = nx0; rugPart.box.w = rugPart.uLen = nx1 - nx0;
+      }
       if (b === last) shapeTopLR(rugPart, x => yTopX(x) - t / cosA + (gd - gs));
     });
   } else if (k.rug === 'opgeschroefd') {
@@ -741,8 +756,10 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   }
 
   // Fronten, legplanken, lades en toestellen per zone
-  const frontX0 = k.front === 'inliggend' ? t + v / 2 : v / 2;
-  const frontX1 = k.front === 'inliggend' ? W - t - v / 2 : W - v / 2;
+  let frontX0 = k.front === 'inliggend' ? t + v / 2 : v / 2;
+  let frontX1 = k.front === 'inliggend' ? W - t - v / 2 : W - v / 2;
+  // Spitse kast: de front stopt waar de schuine bovenkant de onderkant van de front raakt.
+  if (punt) { const reach = (H - v) / tanA - 1; if (rechtsHoog) frontX0 = Math.max(frontX0, W - reach); else frontX1 = Math.min(frontX1, reach); }
   const frontZ = k.front === 'inliggend' ? D - fd : D;
   const innerDepth = D - rugFront - frontInset;
   const nl = NL_LIST.filter(n => n <= innerDepth - 10).pop();
@@ -793,8 +810,16 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     // Knop (hart-op-hart 0): één gat; anders twee gaten.
     const offsets = h > 0 ? [-h / 2, h / 2] : [0];
     if (vertical) {
-      const u = freeLeft ? S.greepRand : p.uLen - S.greepRand;
-      const topV = p.edgeH ? (freeLeft ? p.edgeH.u0 : p.edgeH.u1) : p.vLen;
+      let u = freeLeft ? S.greepRand : p.uLen - S.greepRand;
+      let topV = p.edgeH ? (freeLeft ? p.edgeH.u0 : p.edgeH.u1) : p.vLen;
+      // Schuine deur: is de vrije kant te laag voor de greep, schuif de greep naar binnen tot hij past.
+      if (p.edgeH) {
+        const need = S.greepVanBoven + h + 40, hAt = uu => p.edgeH.u0 + (p.edgeH.u1 - p.edgeH.u0) * uu / p.uLen;
+        if (hAt(u) < need && p.edgeH.u0 !== p.edgeH.u1) {
+          u = Math.max(S.greepRand, Math.min(p.uLen - S.greepRand, (need - p.edgeH.u0) / (p.edgeH.u1 - p.edgeH.u0) * p.uLen));
+          topV = hAt(u);
+        }
+      }
       let vMid = topV - S.greepVanBoven - h / 2;
       if (hasToestel || PRESETS.find(x => x.id === k.type)?.groep === 'Kolomkasten') {
         // Kolomkast: greep zo dicht mogelijk bij een vaste hoogte vanaf de vloer (met toestellen greepHoogteKolom,
@@ -1216,6 +1241,35 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     }
   }
 
+  // Spitse kast: geen zijwand aan de lage kant; bodem en top lopen door tot in de punt en sluiten in verstek met Clamex.
+  if (punt) {
+    const tipRight = !rechtsHoog, tipEdge = tipRight ? 'u1' : 'u0';
+    const tipSide = tipRight ? sideR : sideL;
+    parts.splice(parts.indexOf(tipSide), 1);
+    const tAt = t / cosA, deg = r1(sa * 180 / Math.PI);
+    const reachIn = (H - tAt - t) / tanA;                          // binnenhoek: onderkant top raakt bovenkant bodem
+    const xi = tipRight ? reachIn : W - reachIn;
+    const bodem = parts.find(p => p.id === 'bodem'), top = parts.find(p => p.id === 'top');
+    if (bodem) {
+      bodem.ops = bodem.ops.filter(o => o.edge !== tipEdge);
+      bodem.box.x = tipRight ? t : 0; bodem.box.w = bodem.uLen = W - t;
+      bodem.shape3d = { plane: 'xy', pts: tipRight ? [[0, 0], [W - t, 0], [xi - t, t], [0, t]] : [[0, 0], [W - t, 0], [W - t, t], [xi, t]] };
+    }
+    if (top) {
+      top.ops = top.ops.filter(o => !(o.kind === 'clamex' && o.edge === tipEdge));
+      const yHigh = H, yi = yTopX(tipRight ? t : W - t) - tAt;
+      top.box.y = 0; top.box.h = yHigh;
+      top.shape3d = { plane: 'xy', pts: tipRight ? [[t, yi], [xi, t], [W, 0], [0, yHigh]] : [[xi, t], [W - t, yi], [W, yHigh], [0, 0]] };
+    }
+    if (bodem && top) for (const c of clamexPositions(bodem.vLen, S)) {
+      bodem.ops.push({ kind: 'clamex', edge: tipEdge, pos: bodem.vLen - c, hoek: r1(deg / 2), naam: 'Clamex (verstek punt)' });
+      top.ops.push({ kind: 'clamex', edge: tipEdge, pos: top.vLen - c, hoek: r1(deg / 2), naam: 'Clamex (verstek punt)' });
+      count('Lamello Clamex P-14');
+    }
+    for (let i = warnings.length - 1; i >= 0; i--) if (/^Trapkast in verstek/.test(warnings[i])) warnings.splice(i, 1);
+    warnings.push(`Spitse trapkast (${deg}°): zijwand ${tipRight ? 'links' : 'rechts'} en top aan die kant in verstek op ${r1((90 - deg) / 2)}°; in de punt bodem en top in verstek op ${r1(deg / 2)}° (lange punt aan de buitenkant). Clamex in alle verstekvlakken onder die hoek (Angle in de macro); controleer de richting op het eerste stuk in woodWOP.`);
+  }
+
   // Schuine kast: schroefgaten in de rug in de schuine top (langs de lijn waar de top tegen de rug komt).
   const schuinTop = parts.find(x => x.id === 'top' && x.rol === 'schuin');
   if (vb && groef && schuinTop) {
@@ -1245,7 +1299,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     }
     if (dropped) warnings.push(`${dropped} boring(en) boven de schuine kant zijn weggelaten.`);
     const lowTop = lr ? Math.min(yTopX(t), yTopX(W - t)) - t / cosA : yTopZ(rugFront) - t / cosA;
-    for (const p of parts.filter(p => ['legplank', 'liggend', 'lade', 'stijl'].includes(p.rol) && p.box.y + p.box.h > lowTop + 0.5)) {
+    if (!punt) for (const p of parts.filter(p => ['legplank', 'liggend', 'lade', 'stijl'].includes(p.rol) && p.box.y + p.box.h > lowTop + 0.5)) {
       warnings.push(`${p.naam} komt boven de schuine kant uit (bovenkant ${r1(p.box.y + p.box.h)} mm, lage kant ${r1(lowTop)} mm): pas de vakken aan.`);
     }
   }
