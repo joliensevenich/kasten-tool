@@ -3,7 +3,7 @@
 // Methode: guillotine-schikking (vrije rechthoeken, "best short side fit", splitsen langs de kortste rest).
 // Plaatcoördinaten: X langs de lengte van de plaat (= nerf), Y langs de breedte.
 
-const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, trespaLengte: 3050, trespaBreedte: 1530, zaagsnede: 4, randafzaag: 10 };
+const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, trespaLengte: 3050, trespaBreedte: 1530, zaagsnede: 4, randafzaag: 10, stripVul: 50 };
 // Naam van het plaattype in de platendatabank van HPO (Schelling-zaag): {decor} en {dikte} worden ingevuld.
 const HPO_DEFAULTS = { hpoMelamine: 'MEL_{decor}_{dikte}', hpoHpl: 'OPG_{decor}_{dikte}', hpoTrespa: 'TRESPA_{dikte}' };
 
@@ -52,6 +52,10 @@ function nestingItems(project, S, labelOf, kerf = 0) {
     if (mode === 'nee') current = null;
     offset += W;
   }
+  for (const g of werkbladGeometry(project, S)) for (const p of g.parts.filter(q => (q.rol === 'werkblad' || q.rol === 'spatwand') && q.materiaal === 'plaat')) {
+    const c = cutInfo(p);
+    push(labelOf(p), { label: `Werkblad ${p.naam}`, L: c.L, B: c.B, rotate: !isWoodDecor(p.decor, S.decors) });
+  }
   for (const pn of project.panelen ?? []) {
     const p = panelPartFull(pn, S);
     const c = cutInfo(p);
@@ -72,8 +76,54 @@ function nestingItems(project, S, labelOf, kerf = 0) {
   return groups;
 }
 
+/**
+ * Zaaglogica van een plaatzaag: eerst stroken over de lengte van de plaat (stukken met dezelfde breedte samen),
+ * dan elke strook dwars in stukken (langste eerst). Een iets smaller stuk (tot stripVul mm) mag een strook opvullen
+ * met één bijsnede. Liever een logisch zaagplan dan het minste afval.
+ */
+function nestStrips(items, N) {
+  const L = N.plaatLengte, B = N.plaatBreedte, k = N.zaagsnede, trim = N.randafzaag;
+  const Lu = L - 2 * trim, Bu = B - 2 * trim, fill = N.stripVul ?? 50;
+  const tooBig = [];
+  // Ligging: nerf (niet draaibaar) in de lengte; unikleur met de lange kant in de lengte (smalste strook).
+  const prepared = [];
+  for (const it of items) {
+    let len = it.L, wid = it.B, rot = false;
+    if (it.rotate && it.B > it.L) { len = it.B; wid = it.L; rot = true; }
+    if (len > Lu + 0.01 || wid > Bu + 0.01) {
+      if (it.rotate && !rot && it.B <= Lu && it.L <= Bu) { len = it.B; wid = it.L; rot = true; } else { tooBig.push(it); continue; }
+    }
+    prepared.push({ it, len, wid, rot });
+  }
+  prepared.sort((a, b) => b.wid - a.wid || b.len - a.len);
+  const strips = [];   // { w, used, parts: [{ p, x }] }
+  const room = (st, len) => st.used + (st.parts.length ? k : 0) + len <= Lu + 0.01;
+  for (const pr of prepared) {
+    let st = strips.find(s => Math.abs(s.w - pr.wid) < 0.6 && room(s, pr.len));
+    if (!st) st = strips.find(s => s.w > pr.wid && s.w - pr.wid <= fill && room(s, pr.len));
+    if (!st) { st = { w: pr.wid, used: 0, parts: [] }; strips.push(st); }
+    const x = st.used + (st.parts.length ? k : 0);
+    st.parts.push({ pr, x });
+    st.used = x + pr.len;
+  }
+  // Stroken op platen: breedste eerst, gelijke breedtes naast elkaar.
+  strips.sort((a, b) => b.w - a.w);
+  const sheets = [];
+  for (const st of strips) {
+    let sh = sheets.find(s => s.usedB + (s.strips.length ? k : 0) + st.w <= Bu + 0.01);
+    if (!sh) { sh = { strips: [], usedB: 0, placed: [] }; sheets.push(sh); }
+    const y = sh.usedB + (sh.strips.length ? k : 0);
+    sh.strips.push({ y: trim + y, w: st.w, n: sh.strips.length + 1 });
+    sh.usedB = y + st.w;
+    for (const { pr, x } of st.parts) sh.placed.push({ ...pr.it, x: trim + x, y: trim + y, w: pr.len, h: pr.wid, rotated: pr.rot });
+  }
+  for (const s of sheets) s.usage = s.placed.reduce((t, p) => t + p.w * p.h, 0) / (L * B);
+  return { sheets, tooBig };
+}
+
 /** Schikt stukken op platen. Geeft { sheets: [{ placed: [...] }], tooBig: [...] }. */
 function nest(items, N) {
+  if ((N.methode ?? 'stroken') === 'stroken') return nestStrips(items, N);
   const L = N.plaatLengte, B = N.plaatBreedte, k = N.zaagsnede, trim = N.randafzaag;
   const usableL = L - 2 * trim, usableB = B - 2 * trim;
   const sheets = [];

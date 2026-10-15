@@ -116,6 +116,10 @@ const Projects = {
             </div><div class="group-footer">Automatisch staan onder- en kolomkasten naast elkaar op de vloer, en bovenkasten in een eigen rij op deze hoogte. Met "Verplaatsen" in 3D zet je een kast waar je wilt. Staan kasten tegen elkaar (voorkant op één lijn), dan worden plint en greeplijsten één doorlopend stuk; een te lang stuk wordt op een kastnaad verdeeld.</div></div>
             <div class="group"><div class="group-header">Ruimte en obstakels (optioneel)</div><div class="group-body" id="pj-ruimte"></div>
               <div class="group-footer">Je hoeft geen ruimte te tekenen. Doe je het wel: wand na wand de lengte en de hoek (90° = haakse hoek), te beginnen met de achterwand van links naar rechts. Een obstakel (koker, kolom) zet je met X (vanaf links), Z (vanaf de achterwand) en zijn maten; een kast die er achteraan tegen staat, krijgt automatisch een uitsparing.</div></div>
+            <div class="group"><div class="group-header head-with-btn"><span>Werkbladen</span>
+              ${p.kasten.length ? `<button type="button" class="head-btn" id="pj-wb">${icon('plus')}Werkblad toevoegen</button>` : ''}</div>
+              <div class="group-body" id="pj-werkbladen"></div>
+              <div class="group-footer">Kies de onderkasten waar het werkblad op komt. Boven een spoelbak- of kookplaatkast komt automatisch een uitsparing.</div></div>
             <div class="group"><div class="group-header head-with-btn"><span>Afwerkpanelen</span>
               ${p.kasten.length ? `<button type="button" class="head-btn" id="pj-paneel">${icon('plus')}Paneel toevoegen</button>` : ''}</div>
               <div class="group-body" id="pj-panelen"></div>
@@ -143,6 +147,17 @@ const Projects = {
       openCabinet(p, k);
     }));
     $('#pj-cut', v).addEventListener('click', () => openCutList(p));
+    {
+      const wl = $('#pj-werkbladen', v);
+      const geo = werkbladGeometry(p, S());
+      wl.innerHTML = geo.length ? '' : '<div class="row"><span class="row-sub">Nog geen werkbladen.</span></div>';
+      for (const g of geo) {
+        const r = el(`<button class="row link" type="button"><span class="row-main"><span>${esc(g.wb.naam || 'Werkblad')}</span><span class="row-sub">${mm(g.rect.lengte)} × ${mm(g.rect.diepte)} × ${mm(g.rect.dikte)} · ${esc(g.ks.map(x => x.code).join(', '))}${g.cut.length ? ` · ${g.cut.length} uitsparing(en)` : ''}</span></span><span class="chev">${icon('right')}</span></button>`);
+        r.addEventListener('click', () => openWorktop(p, g.wb, () => { this.keepCamera = true; this.renderProject(); }));
+        wl.appendChild(r);
+      }
+      $('#pj-wb', v)?.addEventListener('click', () => pickWorktopCabinets(p, wb => { this.keepCamera = true; this.renderProject(); openWorktop(p, wb, () => { this.keepCamera = true; this.renderProject(); }); }));
+    }
     $('#pj-std', v).addEventListener('click', () => openStandards(p, () => { this.keepCamera = true; this.renderProject(); }));
     $('#pj-wand', v).addEventListener('click', () => openWallBuilder(p, () => { this.renderProject(); }));
     $('#pj-select', v)?.addEventListener('click', () => { this.selectMode = !this.selectMode; this.selected = new Set(); this.keepCamera = true; this.renderProject(); });
@@ -205,6 +220,7 @@ const Projects = {
       this.viewer = makeViewer($('#pj-viewer', v), { onPick: hit => {
         if (this.panelPick) { pickPanelPoint(hit); return; }
         if (this.moveMode) { this.moveKey = hit?.cab && p.kasten.some(x => x.id === hit.cab) ? hit.cab : null; this.viewer.highlightCab(this.moveKey); renderMove(); return; }
+        if (hit?.cab?.startsWith?.('wb-')) { const wb = p.werkbladen?.find(x => `wb-${x.id}` === hit.cab); if (wb) openWorktop(p, wb, () => { this.keepCamera = true; this.renderProject(); }); return; }
         if (hit?.cab === 'afwerk') { const pn = p.panelen?.find(x => x.id === hit.part.id); if (pn) openPanel(p, pn, () => { this.keepCamera = true; this.renderProject(); }); return; }
         if (hit) { const k = p.kasten.find(x => x.id === hit.cab); if (k) openCabinet(p, k, hit.part.id); }
       } });
@@ -217,6 +233,7 @@ const Projects = {
       }
       const room = roomGeometry(p);
       if (room.parts.length) cabs.push({ key: 'ruimte', parts: room.parts, offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
+      for (const g of werkbladGeometry(p, S())) cabs.push({ key: `wb-${g.wb.id}`, parts: g.parts, offsetX: g.L.x, offsetY: g.L.y, offsetZ: g.L.z, rot: g.L.rot });
       if (p.panelen?.length) cabs.push({ key: 'afwerk', parts: p.panelen.map(pn => panelPartFull(pn, S())), offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
       this.viewer.showFloor = true;
       this.viewer.floorY = 0;
@@ -579,6 +596,80 @@ function openWallBuilder(p, onDone) {
   render();
 }
 
+/** Onderkasten kiezen voor een nieuw werkblad. */
+function pickWorktopCabinets(p, onCreate) {
+  const base = p.kasten.filter(k => cabGroup(k) !== 'boven');
+  const body = el(`<div class="content"><div class="group"><div class="group-body">
+    ${base.map(k => `<label class="row"><span class="row-label">${esc(k.code)} · ${esc(PRESETS.find(x => x.id === k.type)?.naam ?? '')} (${k.breedte ?? '?'})</span><input type="checkbox" data-id="${k.id}" ${cabGroup(k) === 'onder' ? 'checked' : ''}></label>`).join('')}
+    </div><div class="group-footer">Vink de kasten aan die onder dit werkblad staan (een rij tegen elkaar).</div></div>
+    <div class="group"><div class="group-body"><button class="row button" type="button" id="wbk-go">Werkblad maken</button></div></div></div>`);
+  const sheet = openSheet({ title: 'Werkblad: kasten kiezen', left: { label: 'Annuleer' }, body });
+  $('#wbk-go', body).addEventListener('click', () => {
+    const ids = $$('input[data-id]', body).filter(i => i.checked).map(i => i.dataset.id);
+    if (!ids.length) { alertBox('Geen kasten', 'Vink minstens één kast aan.'); return; }
+    // In de volgorde van links naar rechts (volgens de opstelling).
+    const layout = projectLayout(p);
+    ids.sort((a, b) => layout[p.kasten.findIndex(k => k.id === a)].x - layout[p.kasten.findIndex(k => k.id === b)].x);
+    const wb = { id: uid(), naam: `Werkblad ${(p.werkbladen?.length ?? 0) + 1}`, kasten: ids, materiaal: 'plaat', dikte: 38, voor: 20, links: 0, rechts: 0, uitsparingen: [] };
+    p.werkbladen = [...(p.werkbladen ?? []), wb];
+    touch(p); sheet.close(); onCreate(wb);
+  });
+}
+
+/** Werkblad bewerken: materiaal, dikte, overstek, uiteinden, spatwand, uitsparingen. */
+function openWorktop(p, wb, onDone) {
+  const body = el(`<div class="content" id="wbe"></div>`);
+  const sheet = openSheet({ title: wb.naam || 'Werkblad', left: { label: 'Klaar' }, body, onClose: onDone, wide: true });
+  const save = () => { touch(p); };
+  const render = () => {
+    const g = werkbladGeometry(p, S()).find(x => x.wb === wb);
+    body.innerHTML = `<div class="group"><div class="group-body">
+        <div class="row"><span class="row-label">Naam</span><div class="row-fill"><input class="input-plain" id="wb-naam" value="${esc(wb.naam ?? '')}"></div></div>
+        ${row('Materiaal', selectHTML('wb-mat', [['plaat', 'Zelf maken (plaat) – in de zaaglijst'], ['composiet', 'Composiet / steen – bestellen'], ['hout', 'Massief hout – bestellen']], wb.materiaal ?? 'plaat'))}
+        ${row('Dikte', numHTML('wb-dikte', wb.dikte))}
+        ${(wb.materiaal ?? 'plaat') === 'plaat' ? row('Decor', decorSelectHTML('wb-decor', wb.decor ?? '', [['', `Zoals korpus (${S().decorKorpus})`]])) : `<div class="row"><span class="row-label">Kleur / type</span><div class="row-fill"><input class="input-plain" id="wb-decor-tekst" value="${esc(wb.decor ?? '')}" placeholder="bv. Silestone Eternal"></div></div>`}
+        ${row('Overstek voor (voorbij de fronten)', numHTML('wb-voor', wb.voor, '20'))}
+        ${row('Overstek links', numHTML('wb-links', wb.links, '0'))}
+        ${row('Overstek rechts', numHTML('wb-rechts', wb.rechts, '0'))}
+        ${row('Afstand tot de muur', numHTML('wb-achter', wb.achter, '0'))}
+        ${row('Uiteinde links', selectHTML('wb-eL', [['recht', 'Recht'], ['verstek', 'Verstek 45° (hoek)']], wb.eindeLinks ?? 'recht'))}
+        ${row('Uiteinde rechts', selectHTML('wb-eR', [['recht', 'Recht'], ['verstek', 'Verstek 45° (hoek)']], wb.eindeRechts ?? 'recht'))}
+        ${row('Spatwand hoogte', numHTML('wb-spatH', wb.spatHoogte, 'geen'))}
+        ${Number(wb.spatHoogte) > 0 ? row('Spatwand dikte', numHTML('wb-spatD', wb.spatDikte, '12')) : ''}
+      </div><div class="group-footer">${g ? `Werkblad ${mm(g.rect.lengte)} × ${mm(g.rect.diepte)} × ${mm(g.rect.dikte)} mm op ${esc(g.ks.map(x => x.code).join(', '))}.` : ''} Bij een hoek: laat het ene werkblad doorlopen tot in de hoek (overstek = diepte van het andere) of zet beide uiteinden in verstek.</div></div>
+      <div class="group"><div class="group-header">Uitsparingen</div><div class="group-body">
+        ${(g?.cut ?? []).map(c => `<div class="row sub-head"><span class="row-sub"><b>${esc(c.naam)}</b>${c.auto ? ' (automatisch)' : ''}</span>
+          <button class="mini danger" type="button" data-cdel="${c.kast ?? c.id}" aria-label="Verwijder">${icon('trash')}</button></div>
+          ${row('Breedte × diepte', `${numHTML(`wc-b-${c.kast ?? c.id}`, c.b)}${numHTML(`wc-d-${c.kast ?? c.id}`, c.d)}`)}
+          ${row('Midden vanaf links / vanaf voorkant', `${numHTML(`wc-x-${c.kast ?? c.id}`, Math.round(c.cx * 10) / 10)}${numHTML(`wc-v-${c.kast ?? c.id}`, Math.round(c.voor * 10) / 10)}`)}`).join('')}
+        <button class="row button" type="button" id="wc-add"><span class="icon-label">${icon('plus')}Uitsparing toevoegen</span></button>
+      </div><div class="group-footer">"Vanaf voorkant" = afstand van de voorkant van het werkblad tot de uitsparing.</div></div>
+      <div class="group"><div class="group-body"><button class="row button danger" type="button" id="wb-del">Werkblad verwijderen</button></div></div>`;
+    const num = e => e.value === '' ? null : Number(e.value);
+    $('#wb-naam', body).addEventListener('input', e => { wb.naam = e.target.value; save(); });
+    $('#wb-mat', body).addEventListener('change', e => { wb.materiaal = e.target.value; if (!wb.dikte || [38, 20, 40].includes(wb.dikte)) wb.dikte = { plaat: 38, composiet: 20, hout: 40 }[wb.materiaal]; save(); render(); });
+    for (const [id, key] of [['wb-dikte', 'dikte'], ['wb-voor', 'voor'], ['wb-links', 'links'], ['wb-rechts', 'rechts'], ['wb-achter', 'achter'], ['wb-spatD', 'spatDikte']]) $(`#${id}`, body)?.addEventListener('change', e => { wb[key] = num(e.target); save(); render(); });
+    $('#wb-spatH', body).addEventListener('change', e => { wb.spatHoogte = num(e.target); save(); render(); });
+    $('#wb-eL', body).addEventListener('change', e => { wb.eindeLinks = e.target.value; save(); });
+    $('#wb-eR', body).addEventListener('change', e => { wb.eindeRechts = e.target.value; save(); });
+    const dec = $('#wb-decor', body); if (dec) bindDecor(dec, v => { wb.decor = v || null; save(); });
+    $('#wb-decor-tekst', body)?.addEventListener('change', e => { wb.decor = e.target.value; save(); });
+    const own = key => { let u = (wb.uitsparingen ?? []).find(x => (x.kast ?? x.id) === key); if (!u) { u = { kast: key }; wb.uitsparingen = [...(wb.uitsparingen ?? []), u]; } return u; };
+    for (const c of g?.cut ?? []) {
+      const key = c.kast ?? c.id;
+      for (const [pre, field] of [['b', 'breedte'], ['d', 'diepte'], ['x', 'x'], ['v', 'voor']]) $(`#wc-${pre}-${key}`, body).addEventListener('change', e => { own(key)[field] = num(e.target); save(); render(); });
+    }
+    $$('[data-cdel]', body).forEach(b => b.addEventListener('click', () => {
+      const key = b.dataset.cdel, c = g.cut.find(x => (x.kast ?? x.id) === key);
+      if (c?.auto) own(key).weg = true; else wb.uitsparingen = wb.uitsparingen.filter(x => x.id !== key);
+      save(); render();
+    }));
+    $('#wc-add', body).addEventListener('click', () => { wb.uitsparingen = [...(wb.uitsparingen ?? []), { id: uid(), naam: 'Uitsparing', breedte: 500, diepte: 400, x: Math.round((g?.rect.lengte ?? 1000) / 2), voor: 80 }]; save(); render(); });
+    $('#wb-del', body).addEventListener('click', () => { p.werkbladen = (p.werkbladen ?? []).filter(x => x !== wb); save(); sheet.close(); });
+  };
+  render();
+}
+
 /** Ruimte (wanden) en obstakels van het project bewerken. */
 function renderRoom(p, v) {
   const box = $('#pj-ruimte', v);
@@ -726,7 +817,7 @@ async function saveOwnType(k) {
 // MARK: - Kasteditor
 
 const OPTIONS = {
-  plint: [['stelpoten', 'Stelpoten met plint'], ['vast', 'Vaste plint'], ['geen', 'Geen plint']],
+  plint: [['stelpoten', 'Stelpoten met plint'], ['bak', 'Plintenbak (multiplex)'], ['vast', 'Vaste plint'], ['geen', 'Geen plint']],
   top: [['regels', 'Regels'], ['staand', 'Regels rechtop'], ['vol', 'Volle top']],
   rug: [['groef', 'In groef'], ['opgeschroefd', 'Opgeschroefd paneel'], ['geen', 'Geen rug']],
   front: [['opliggend', 'Opliggend'], ['inliggend', 'Inliggend']],
@@ -796,7 +887,8 @@ function openCabinet(project, k, selectId = null) {
       <div class="group"><div class="group-header">Korpus</div><div class="group-body">
         ${row('Plint', selectHTML('f-plint', OPTIONS.plint, k.plint))}
         <div id="f-plint-h">${row('Plinthoogte', numHTML('f-plintHoogte', k.plintHoogte))}
-          <div class="row"><span class="row-label">Trespa onder de plint (${S().trespaDikte} mm)</span>${toggleHTML('f-plintTrespa', k.plintTrespa)}</div></div>
+          <div class="row"><span class="row-label">Trespa onder de plint (${S().trespaDikte} mm)</span>${toggleHTML('f-plintTrespa', k.plintTrespa)}</div>
+          ${k.plint === 'bak' ? `<div class="row"><span class="row-label">Afwerkplint voor de bak</span>${toggleHTML('f-plintAfwerk', k.plintAfwerk !== false)}</div>` : ''}</div>
         ${row('Plaatdikte korpus', numHTML('f-plaatDikte', k.plaatDikte, `${S().plaat} (standaard)`))}
         ${row('Schuine kast', selectHTML('f-schuin', [['geen', 'Nee'], ['lr', 'Schuin links-rechts (trap)'], ['vb', 'Schuin voor-achter (dak)']], k.schuin?.richting ?? 'geen'))}
         ${(k.schuin?.richting ?? 'geen') !== 'geen' ? `${k.schuin.richting === 'lr' ? row('Lage kant', selectHTML('f-schuinLaag', [['zijwand', 'Met zijwand'], ['punt', 'Punt (0 mm, in verstek)']], k.schuin?.laag ?? 'zijwand')) : ''}
@@ -881,7 +973,7 @@ function openCabinet(project, k, selectId = null) {
     ['plint', 'top', 'rug', 'front', 'greep', 'deuren', 'scharnierKant', 'blindKant', 'frontMateriaal', 'houtDoorlopend', 'plaatsing'].forEach(key => bindVal('f-' + key, key));
     ['posX', 'posY', 'posZ'].forEach(key => bindVal('f-' + key, key, 'num'));
     $('#f-rot', form)?.addEventListener('change', e => { k.rot = Number(e.target.value); update(); });
-    ['zichtL', 'zichtR', 'verluchting', 'wegneembareRug', 'plintTrespa'].forEach(key => bindVal('f-' + key, key));
+    ['zichtL', 'zichtR', 'verluchting', 'wegneembareRug', 'plintTrespa', 'plintAfwerk'].forEach(key => bindVal('f-' + key, key));
     for (const key of ['decorKorpus', 'decorFront', 'decorRug', 'bandKorpusDecor']) {
       const e = $('#f-' + key, form);
       if (e) bindDecor(e, v => { k[key] = v || null; markEigen(key); update(); });
@@ -938,9 +1030,14 @@ function openCabinet(project, k, selectId = null) {
           <button class="mini danger" type="button" data-act="del" aria-label="Verwijder" ${k.secties.length === 1 ? 'disabled' : ''}>${icon('trash')}</button>
         </div></div>
         ${s.type === 'toestel' ? '' : row('Hoogte', numHTML(`s-hoogte-${i}`, s.hoogte, zh != null ? `auto (${mm(zh)})` : 'auto'))}
-        ${s.type === 'lade' ? row('Aantal lades', numHTML(`s-lades-${i}`, s.lades, '1')) + row('Geleider', selectHTML(`s-serie-${i}`, SERIES.map(x => [x, x]), s.serie))
+        ${s.type === 'lade' ? row('Aantal lades', numHTML(`s-lades-${i}`, s.lades, '1')) + row('Uitvoering', selectHTML(`s-uitvoering-${i}`, [['zelf', 'Zelf maken (bodem en rug)'], ['opmaat', 'Op maat bestellen']], s.uitvoering ?? 'zelf')) + row('Geleider', selectHTML(`s-serie-${i}`, SERIES.map(x => [x, x]), s.serie))
           + row('Ladetype', selectHTML(`s-ladeType-${i}`, (S().blum[s.serie]?.types ?? []).map(x => [x.code, `${s.serie} ${x.code} (rug ${x.rugH} mm)`]), s.ladeType || ((S().blum[s.serie]?.types ?? []).some(x => x.code === 'M') ? 'M' : (S().blum[s.serie]?.types?.[0]?.code ?? '')))) : ''}
         ${s.type === 'lade' && (Number(s.lades) || 1) > 1 ? ladesHTML(s, i, res) : ''}
+        ${s.type === 'deur' ? row('Binnenladen achter de deur', numHTML(`s-binnenladen-${i}`, s.binnenladen, '0')) : ''}
+        ${s.type === 'deur' && Number(s.binnenladen) > 0 ? row('Binnenladen: uitvoering', selectHTML(`s-binnenUitvoering-${i}`, [['zelf', 'Zelf maken (bodem en rug)'], ['opmaat', 'Op maat bestellen']], s.binnenUitvoering ?? 'zelf'))
+          + row('Binnenladen: geleider', selectHTML(`s-binnenSerie-${i}`, SERIES.map(x => [x, x]), s.binnenSerie ?? 'LEGRABOX'))
+          + row('Binnenladen: ladetype', selectHTML(`s-binnenType-${i}`, (S().blum[s.binnenSerie ?? 'LEGRABOX']?.types ?? []).map(x => [x.code, `${x.code} (rug ${x.rugH} mm)`]), s.binnenType || 'M'))
+          + `<div class="row"><span class="row-sub">Op verdikkingsblokken van ${S().binnenladeOpvul} mm, zodat de lades langs de scharnieren kunnen; binnenfront ${S().binnenladeTerug} mm achter de voorkant. Legplanken komen erboven.</span></div>` : ''}
         ${['deur', 'open', 'klep'].includes(s.type) ? row('Legplanken (per deel)', numHTML(`s-legplanken-${i}`, s.legplanken, '0')) + divisionHTML(s, i) : ''}
         ${s.type === 'toestel' ? `<div class="row"><span class="row-label">Toestel</span><div class="row-fill"><input class="input-plain" id="s-toestel-${i}" value="${esc(s.toestel)}" placeholder="bv. Oven"></div></div>
           ${row('Inbouwhoogte', numHTML(`s-nis-${i}`, s.nis, s.hoogte ? `vak ${mm(s.hoogte)}` : 'auto'))}
@@ -958,12 +1055,14 @@ function openCabinet(project, k, selectId = null) {
           if (field === 'type') { renderForm(); update(); return; }
           if (field === 'serie') { s.ladeType = ''; markEigen('serie'); renderSections(); update(); return; }
           update();
+          if (field === 'binnenladen' || field === 'binnenSerie') { renderSections(); const el3 = $(`#s-${field}-${i}`, form); el3?.focus(); return; }
           if (field === 'lades') { renderSections(); const el2 = $(`#s-lades-${i}`, form); el2?.focus(); el2?.setSelectionRange?.(99, 99); return; }
           if (['hoogte', 'nis', 'nisBreedte', 'nisDiepte'].includes(field)) refreshZoneHints();
         });
       };
       bind('type'); bind('hoogte', 'num'); bind('lades', 'num'); bind('serie'); bind('legplanken', 'num'); bind('toestel'); bind('opVloer');
-      bind('nis', 'num'); bind('nisBreedte', 'num'); bind('nisDiepte', 'num'); bind('ladeType');
+      bind('nis', 'num'); bind('nisBreedte', 'num'); bind('nisDiepte', 'num'); bind('ladeType'); bind('uitvoering');
+      bind('binnenladen', 'num'); bind('binnenUitvoering'); bind('binnenSerie'); bind('binnenType');
       if (['deur', 'open', 'klep'].includes(s.type)) bindDivision(s, i, card, zone);
       if (s.type === 'lade') bindLades(s, i, card);
       $('[data-act=up]', card).addEventListener('click', () => { [k.secties[i + 1], k.secties[i]] = [k.secties[i], k.secties[i + 1]]; renderSections(); update(); });
@@ -1089,7 +1188,8 @@ function openCabinet(project, k, selectId = null) {
       ${res.warnings.length ? `<div class="group"><div class="group-header">Let op</div><div class="group-body">${res.warnings.map(w => `<div class="row warn-row">${icon('warning')}<span>${esc(w)}</span></div>`).join('')}</div></div>` : ''}
       <div class="group"><div class="group-header"><span>Onderdelen</span><span>${parts.length}</span></div><div class="group-body" id="f-parts"></div>
         <div class="group-footer">Tik op een onderdeel (of in de 3D-weergave) voor de tekening met boringen en groeven, en om kantenbanden aan te passen.</div></div>
-      <div class="group"><div class="group-header">Beslag</div><div class="group-body">${res.hardware.map(h => `<div class="row"><span class="row-label">${esc(h.naam)}</span><span class="row-value num">${h.aantal}</span></div>`).join('') || '<div class="row"><span class="row-sub">Geen beslag.</span></div>'}</div></div>`;
+      <div class="group"><div class="group-header">Beslag</div><div class="group-body">${res.hardware.map(h => `<div class="row"><span class="row-label">${esc(h.naam)}</span><span class="row-value num">${h.aantal}</span></div>`).join('') || '<div class="row"><span class="row-sub">Geen beslag.</span></div>'}</div></div>
+      ${res.bestel?.length ? `<div class="group"><div class="group-header">Te bestellen</div><div class="group-body">${res.bestel.map(h => `<div class="row"><span class="row-label">${esc(h.naam)}</span><span class="row-value num">${h.aantal}×</span></div>`).join('')}</div></div>` : ''}`;
     const list = $('#f-parts', box);
     for (const p of parts) {
       const c = cutInfo(p);
@@ -1361,6 +1461,7 @@ function panelSVG(p, names) {
 function cutRows(project) {
   const rows = [];
   const hardware = {};
+  const bestel = {};
   for (const { k, res, parts } of projectParts(project, S())) {
     if (res.error) continue;
     for (const p of sawParts(parts, S())) {
@@ -1368,6 +1469,14 @@ function cutRows(project) {
       rows.push({ kast: p.kastLabel ?? k.code, naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...c });
     }
     for (const h of res.hardware) hardware[h.naam] = (hardware[h.naam] ?? 0) + h.aantal;
+    for (const b of res.bestel ?? []) bestel[b.naam] = (bestel[b.naam] ?? 0) + b.aantal;
+  }
+  // Werkbladen: zelf gemaakt (plaat) in de zaaglijst; composiet/hout op de bestellijst (bij het beslag).
+  for (const g of werkbladGeometry(project, S())) {
+    for (const p of g.parts.filter(q => q.rol === 'werkblad' || q.rol === 'spatwand')) {
+      if (p.materiaal === 'plaat') rows.push({ kast: 'Werkblad', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p) });
+      else bestel[`${p.rol === 'spatwand' ? 'Spatwand' : 'Werkblad'} ${p.plaattype.toLowerCase()} ${Math.round(p.uLen)} × ${Math.round(p.vLen)} × ${p.dikte} (${p.decor || ''})${p.rol === 'werkblad' && g.cut.length ? `, ${g.cut.length} uitsparing(en)` : ''}`] = 1;
+    }
   }
   // Afwerkpanelen van het project.
   for (const pn of project.panelen ?? []) {
@@ -1389,12 +1498,12 @@ function cutRows(project) {
     const key = `${r[e]} mm · ${decorName(r[e + 'd'])}`;
     bands[key] = (bands[key] ?? 0) + (e[0] === 'L' ? r.L : r.B) * r.aantal / 1000;
   }
-  return { rows: merged, hardware: Object.entries(hardware).map(([naam, aantal]) => ({ naam, aantal })),
+  return { rows: merged, hardware: Object.entries(hardware).map(([naam, aantal]) => ({ naam, aantal })), bestel: Object.entries(bestel).map(([naam, aantal]) => ({ naam, aantal })),
     bands: Object.entries(bands).map(([naam, m]) => ({ naam, meter: Math.round(m * 100) / 100 })) };
 }
 
 function openCutList(project) {
-  const { rows, hardware, bands } = cutRows(project);
+  const { rows, hardware, bands, bestel } = cutRows(project);
   const mats = [...new Set(rows.map(r => r.mat))];
   const band = (r, e) => r[e] ? `${r[e]} ${esc(r[e + 'd'])}` : '–';
   const body = el(`<div class="content wide">
@@ -1408,15 +1517,17 @@ function openCutList(project) {
       }).join('')}</div></div>`).join('')}
     <div class="group"><div class="group-header">Kantenband</div><div class="group-body">${bands.map(b => `<div class="row"><span class="row-label">${esc(b.naam)}</span><span class="row-value num">${mm(b.meter)} m</span></div>`).join('') || '<div class="row"><span class="row-sub">Geen kantenband.</span></div>'}</div>
       <div class="group-footer">Netto lengte, zonder overmaat.</div></div>
-    <div class="group"><div class="group-header">Beslag</div><div class="group-body">${hardware.map(h => `<div class="row"><span class="row-label">${esc(h.naam)}</span><span class="row-value num">${h.aantal}</span></div>`).join('') || '<div class="row"><span class="row-sub">Geen beslag.</span></div>'}</div>
-    <div class="group-footer">Lengte = langs de nerf. L1/L2 = band op de lange kanten, B1/B2 = op de korte kanten, met dikte (mm) en decor. De zaagmaat is de eindmaat.</div></div>
+    <div class="group"><div class="group-header">Beslag</div><div class="group-body">${hardware.map(h => `<div class="row"><span class="row-label">${esc(h.naam)}</span><span class="row-value num">${h.aantal}</span></div>`).join('') || '<div class="row"><span class="row-sub">Geen beslag.</span></div>'}</div></div>
+    ${bestel.length ? `<div class="group"><div class="group-header">Te bestellen</div><div class="group-body">${bestel.map(h => `<div class="row"><span class="row-label">${esc(h.naam)}</span><span class="row-value num">${h.aantal}×</span></div>`).join('')}</div>
+      <div class="group-footer">Lades op maat en werkbladen die je bestelt: ze staan niet in de zaaglijst of het zaagplan.</div></div>` : ''}
+    <div class="group"><div class="group-footer">Lengte = langs de nerf. L1/L2 = band op de lange kanten, B1/B2 = op de korte kanten, met dikte (mm) en decor. De zaagmaat is de eindmaat.</div></div>
   </div>`);
   openSheet({
     title: `Zaaglijst ${project.naam}`, full: true, left: { label: 'Klaar', bold: true },
     right: { icon: 'share', label: 'Exporteren', onClick: async () => {
       const c = await actionSheet('Zaaglijst exporteren', '', [
         { label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'STK voor de zaag (Schelling HPO)', value: 'stk' }, { label: 'CSV', value: 'csv' }]);
-      if (c === 'xlsx') shareFile(cutListXlsx(project, rows, hardware, bands), `Zaaglijst ${safeName(project.naam)}.xlsx`);
+      if (c === 'xlsx') shareFile(cutListXlsx(project, rows, hardware, bands, bestel), `Zaaglijst ${safeName(project.naam)}.xlsx`);
       if (c === 'csv') shareFile(cutListCsv(project, rows), `Zaaglijst ${safeName(project.naam)}.csv`);
       if (c === 'stk') { const stk = cutListStk(project, rows); shareFile(stk.blob, stk.name); }
     } },
@@ -1540,7 +1651,7 @@ function cutListStk(project, rows) {
   return { blob: new Blob([utf16le(lines.join('\r\n') + '\r\n')], { type: 'application/octet-stream' }), name: `${name}.stk` };
 }
 
-function cutListXlsx(project, rows, hardware, bands) {
+function cutListXlsx(project, rows, hardware, bands, bestel = []) {
   const b = (r, e) => r[e] ? `${r[e]} mm ${r[e + 'd']}` : '';
   return makeXlsx([
     { name: 'Zaaglijst', columns: [8, 30, 26, 11, 8, 8, 10, 10, 16, 16, 16, 16],
@@ -1548,6 +1659,7 @@ function cutListXlsx(project, rows, hardware, bands) {
         ...rows.map(r => [r.kast, r.naam, decorName(r.decor), r.plaattype ?? 'Melamine', r.dikte, r.aantal, r.L, r.B, b(r, 'L1'), b(r, 'L2'), b(r, 'B1'), b(r, 'B2')])] },
     { name: 'Kantenband', columns: [36, 10], rows: [['Kantenband', 'Meter'], ...bands.map(x => [x.naam, x.meter])] },
     { name: 'Beslag', columns: [40, 10], rows: [['Beslag', 'Aantal'], ...hardware.map(h => [h.naam, h.aantal])] },
+    { name: 'Bestellen', columns: [90, 10], rows: [['Te bestellen', 'Aantal'], ...bestel.map(h => [h.naam, h.aantal])] },
   ]);
 }
 
@@ -1577,7 +1689,7 @@ function openCutPlan(project) {
       }).join('')}
     </div>`);
   }
-  body.innerHTML = `<div class="notice">${icon('ruler')}<span>Platen: melamine ${N.plaatLengte} × ${N.plaatBreedte} mm, HPL ${N.hplLengte} × ${N.hplBreedte} mm; zaagsnede ${N.zaagsnede} mm, randafzaag ${N.randafzaag} mm (aan te passen in Instellingen). Houtdecors blijven met de nerf in de lengte van de plaat; unikleuren mogen draaien. Alle sneden lopen recht door, zoals op een plaatzaag.</span></div>`
+  body.innerHTML = `<div class="notice">${icon('ruler')}<span>Platen: melamine ${N.plaatLengte} × ${N.plaatBreedte} mm, HPL ${N.hplLengte} × ${N.hplBreedte} mm; zaagsnede ${N.zaagsnede} mm, randafzaag ${N.randafzaag} mm (aan te passen in Instellingen). Houtdecors blijven met de nerf in de lengte van de plaat; unikleuren mogen draaien. ${(N.methode ?? 'stroken') === 'stroken' ? 'Zaagvolgorde: eerst de genummerde stroken over de lengte (stukken met dezelfde breedte samen), daarna elke strook dwars in stukken.' : 'Schikking voor zo weinig mogelijk afval; alle sneden lopen recht door.'}</span></div>`
     + (parts.join('') || '<div class="empty"><h2>Geen onderdelen</h2><p>Vul eerst de maten van de kasten in.</p></div>')
     + `<div class="group-footer">Totaal ${totalSheets} ${totalSheets === 1 ? 'plaat' : 'platen'}. Op elk stuk staan de benaming en de maat (lengte × breedte); de lijst onder elke plaat geeft hetzelfde in tekst. Samengestelde stukken met doorlopende nerf staan gestreept omlijnd; zaag ze eerst als één stuk. ↻ = gedraaid (alleen bij unikleuren).</div>`;
   openSheet({ title: `Zaagplan ${project.naam}`, full: true, left: { label: 'Klaar', bold: true },
@@ -1623,6 +1735,11 @@ function sheetSVG(sh, N, color, list) {
       list.push({ n, label: p.label, L: p.L, B: p.B, rotated: p.rotated });
       g += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" class="plan-part" style="fill:${color}"/>` + label(p.x, p.y, p.w, p.h, n);
     }
+  }
+  // Stroken (zaaglogica): eerst de stroken over de lengte zagen (genummerd, met de breedte), dan elke strook in stukken.
+  for (const st of sh.strips ?? []) {
+    if (st.y + st.w < B - 5) g += `<line x1="0" y1="${st.y + st.w + N.zaagsnede / 2}" x2="${L}" y2="${st.y + st.w + N.zaagsnede / 2}" class="plan-strip"/>`;
+    g += `<text x="${L - 8}" y="${st.y + 46}" font-size="40" text-anchor="end" class="plan-striptext">strook ${st.n} · ${mm(st.w)}</text>`;
   }
   // Maatlijnen: lengte onder de plaat, breedte links ernaast.
   const t = 18;
@@ -1735,16 +1852,16 @@ const SETTING_GROUPS = [
   ['Platen', [['plaat', 'Korpus (mm)'], ['front', 'Fronten (mm)'], ['rug', 'Rug in groef (mm)'], ['rugDik', 'Opgeschroefde rug (mm)'], ['ladeBodemDikte', 'Ladebodem en -rug (mm)']]],
   ['Rugwandgroef', [['groefBreedte', 'Breedte'], ['groefDiepte', 'Diepte'], ['rugInsprong', 'Afstand tot achterkant'], ['rugSpeling', 'Speling per kant'], ['rugSchroefAfstand', 'Schroefafstand opgeschroefde rug']]],
   ['Kantenband', [['bandKorpus', 'Voorkant korpus (mm)'], ['bandLegplank', 'Voorkant legplank (mm)'], ['bandFront', 'Rondom fronten (mm)']]],
-  ['Fronten', [['voeg', 'Voeg tussen fronten'], ['deurMaxBreedte', 'Max. breedte van één deur'], ['greepHartafstand', 'Greep hart-op-hart (standaard)'], ['greepDia', 'Greepgat Ø'], ['greepRand', 'Greep afstand tot rand'], ['greepVanBoven', 'Greep (deur) vanaf boven'], ['greepHoogteKolom', 'Kolomkast met toestel: greep op hoogte'], ['greepHoogteKolomZonder', 'Kolomkast zonder toestel: greep op hoogte'], ['greepVanOnder', 'Kolomkast: deur erboven, greep vanaf onder'], ['greeplijstBinnenHoogte', 'Greeplijst: binnenhoogte'], ['greeplijstBinnenDiepte', 'Greeplijst: binnendiepte']]],
+  ['Fronten', [['voeg', 'Voeg tussen fronten'], ['deurMaxBreedte', 'Max. breedte van één deur'], ['greepHartafstand', 'Greep hart-op-hart (standaard)'], ['greepDia', 'Greepgat Ø'], ['greepRand', 'Greep afstand tot rand'], ['greepVanBoven', 'Greep (deur) vanaf boven'], ['greepHoogteKolom', 'Kolomkast met toestel: greep op hoogte'], ['greepHoogteKolomZonder', 'Kolomkast zonder toestel: greep op hoogte'], ['greepVanOnder', 'Kolomkast: deur erboven, greep vanaf onder'], ['greeplijstBinnenHoogte', 'Greeplijst: binnenhoogte'], ['greeplijstBinnenDiepte', 'Greeplijst: binnendiepte'], ['greepGrijp', 'Greeplijst: front steekt uit in de greep']]],
   ['Deuvels en schroeven', [['deuvelDia', 'Deuvel Ø'], ['deuvelLengte', 'Deuvel lengte'], ['deuvelEersteVoor', 'Eerste deuvel vanaf voor'], ['deuvelPaar', 'Tweede deuvel: + (paar)'], ['deuvelLaatsteAchter', 'Laatste deuvel vanaf achter'], ['deuvelMaxTussen', 'Max. afstand ertussen'], ['schroefVoor', 'Eerste schroef vanaf voor'], ['schroefAchter', 'Laatste schroef vanaf achter'], ['deuvelDiepteVlak', 'Diepte in het vlak'], ['deuvelDiepteKant', 'Diepte in de kant'], ['schroefDia', 'Schroefgat Ø']]],
   ['Clamex', [['clamexMarge', 'Eerste en laatste vanaf voor/achter'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexDeuvel', 'Deuvel naast de Clamex (±)']]],
   ['Hangkasten', [['ophangVanBoven', 'Ophanggaten vanaf boven'], ['ophangVanAchter', 'Ophanggaten vanaf achter'], ['ophangDia', 'Ophanggat Ø'], ['ophangDiepte', 'Ophanggat diepte']]],
   ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder'], ['scharnierDeuvelDiepte', 'Deuvelgaatjes scharnier diepte'], ['plaatjeHoogte', 'Hoogte montageplaatje'], ['scharnierVrij', 'Vrij rond regels/tussenbodems'], ['scharnierInbouw', 'Schuine kast: scharnier steekt de kast in'], ['blindPlaatRand', 'Blinde hoek: plaatje vanaf kant blindpaneel'], ['blindPlaatTussen', 'Blinde hoek: afstand tussen gaten'], ['blindPlaatDia', 'Blinde hoek: gat Ø'], ['blindPlaatDiepte', 'Blinde hoek: gat diepte'], ['demperRand', 'Demper vanaf de hoek'], ['demperDia', 'Demper Ø'], ['demperDiepte', 'Demper diepte']]],
   ['Systeemboringen', [['systeemVoor', 'Vanaf voorkant'], ['systeemVoorSmal', 'Vanaf voorkant in smalle kast'], ['systeemSmalGrens', 'Smalle kast: breedte kleiner dan'], ['systeemAchter', 'Vanaf rug'], ['systeemRaster', 'Raster'], ['systeemMarge', 'Vanaf boven/onder'], ['systeemDia', 'Ø'], ['systeemDiepte', 'Diepte']]],
   ['Markeringen', [['pootRandZij', 'Stelpoot: vanaf zijkant bodem'], ['pootVoor', 'Stelpoot: vanaf voorkant'], ['pootAchter', 'Stelpoot: vanaf achterkant'], ['pootVierkant', 'Stelpoot: vierkant puntjes'], ['pootMiddenVoor', 'Middenpoot voor vanaf breedte'], ['pootMiddenAchter', 'Middenpoot achter vanaf breedte'], ['pootDia', 'Puntje Ø'], ['pootDiepte', 'Puntje diepte'], ['hoekMerkRand', 'Merk zijwand: vanaf onder/achter'], ['hoekMerkDia', 'Merk zijwand Ø'], ['hoekMerkDiepte', 'Merk zijwand diepte']]],
-  ['Ladegeleiders', [['frontBevZij', 'Frontbevestiging: vanaf binnenkant zijwand'], ['frontBevDia', 'Frontbevestiging Ø'], ['frontBevDiepte', 'Frontbevestiging diepte'], ['geleiderDia', 'Punten geleider Ø (euroschroef)'], ['geleiderDiepte', 'Punten geleider diepte'], ['geleiderAchterVrij', 'Laatste punt min. voor einde geleider'], ['ladeSponningBreedte', 'Bodem/rug: sponning breedte'], ['ladeSponningDiepte', 'Bodem/rug: sponning diepte'], ['ladeSchroefAfstand', 'Schroeven bodem in rug: afstand']]],
+  ['Ladegeleiders', [['frontBevZij', 'Frontbevestiging: vanaf binnenkant zijwand'], ['frontBevDia', 'Frontbevestiging Ø'], ['frontBevDiepte', 'Frontbevestiging diepte'], ['geleiderDia', 'Punten geleider Ø (euroschroef)'], ['geleiderDiepte', 'Punten geleider diepte'], ['geleiderAchterVrij', 'Laatste punt min. voor einde geleider'], ['binnenladeOpvul', 'Binnenladen: dikte verdikkingsblok'], ['binnenladeTerug', 'Binnenladen: binnenfront terug van voorkant'], ['binnenfrontExtra', 'Binnenfront: hoogte rug + '], ['binnenladeTussen', 'Binnenladen: ruimte ertussen'], ['ladeSponningBreedte', 'Bodem/rug: sponning breedte'], ['ladeSponningDiepte', 'Bodem/rug: sponning diepte'], ['ladeSchroefAfstand', 'Schroeven bodem in rug: afstand']]],
   ['Led-verlichting', [['ledBreedte', 'Breedte groef'], ['ledDiepte', 'Diepte groef'], ['ledAfstand', 'Standaard afstand tot rand'], ['ledKabelDia', 'Kabelgat Ø'], ['ledKabelAfstand', 'Kabelgat vanaf einde groef']]],
-  ['Overige', [['regelBreedte', 'Breedte regels'], ['hangGreepUitsteek', 'Hangkast greeploos: front steekt onder uit'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
+  ['Overige', [['regelBreedte', 'Breedte regels'], ['hangGreepUitsteek', 'Hangkast greeploos: front steekt onder uit'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['plintBakDikte', 'Plintenbak: dikte multiplex'], ['plintBakAfstand', 'Plintenbak: tussenlatten om de'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
 ];
 
 const SettingsView = {
@@ -1837,6 +1954,8 @@ const SettingsView = {
           <div class="row"><span class="row-label">HPO-plaattype melamine</span><div class="row-fill"><input class="input-plain" id="nz-hpoMelamine" value="${esc(s.nest.hpoMelamine ?? HPO_DEFAULTS.hpoMelamine)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype HPL</span><div class="row-fill"><input class="input-plain" id="nz-hpoHpl" value="${esc(s.nest.hpoHpl ?? HPO_DEFAULTS.hpoHpl)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype Trespa</span><div class="row-fill"><input class="input-plain" id="nz-hpoTrespa" value="${esc(s.nest.hpoTrespa ?? HPO_DEFAULTS.hpoTrespa)}"></div></div>
+          ${row('Zaagplan', selectHTML('nz-methode', [['stroken', 'Logisch zagen (stroken)'], ['afval', 'Zo weinig mogelijk afval']], s.nest.methode ?? 'stroken'))}
+          ${row('Strook opvullen met smaller stuk tot', numHTML('nz-stripVul', s.nest.stripVul ?? 50))}
           ${row('CSV: scheidingsteken', selectHTML('nz-csvScheiding', [[';', 'Puntkomma ;'], [',', 'Komma ,'], ['\t', 'Tab']], s.nest.csvScheiding ?? ';'))}
           ${row('CSV: decimaalteken', selectHTML('nz-csvDecimaal', [['.', 'Punt (12.5)'], [',', 'Komma (12,5)']], s.nest.csvDecimaal ?? '.'))}
         </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde. HPO-plaattype: de naam van de plaat in de platendatabank van de zaag, {decor} en {dikte} worden ingevuld (MEL_{decor}_{dikte} → MEL_W980_18). Die naam moet exact bestaan in HPO.</div></div>
@@ -1888,7 +2007,7 @@ const SettingsView = {
     $('#st-frontMateriaal', v).addEventListener('change', e => { s.frontMateriaal = e.target.value; Store.save(); });
     for (const key of ['decorKorpus', 'decorFront']) bindDecor($(`#st-${key}`, v), val => { s[key] = val; Store.save(); this.render(); });
     for (const key of Object.keys(NEST_DEFAULTS)) $(`#nz-${key}`, v)?.addEventListener('change', e => { if (e.target.value !== '') { s.nest[key] = Number(e.target.value); Store.save(); } });
-    for (const key of ['csvScheiding', 'csvDecimaal']) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value; Store.save(); });
+    for (const key of ['csvScheiding', 'csvDecimaal', 'methode']) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value; Store.save(); });
     for (const key of Object.keys(HPO_DEFAULTS)) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value.trim() || HPO_DEFAULTS[key]; Store.save(); });
     for (const key of Object.keys(MPR_DEFAULTS)) {
       $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'clamex' ? e.target.checked : key === 'doorExtra' ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });

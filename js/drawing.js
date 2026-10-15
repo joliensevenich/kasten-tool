@@ -225,6 +225,84 @@ function drawPartSide(doc, info, sideKey, meta) {
     `${meta.mpr}${sideKey === 'B' ? ' (zijde B)' : ''} · ${meta.datum}`);
 }
 
+/** Plintinsprong (voor de tekst bij de montage). */
+const S0plint = () => (typeof S === 'function' ? S().plintInsprong : 0);
+
+/** Kolom met titels en regels; afgebroken met … als het niet meer past. */
+function infoColumn(doc, sections, x, y, width, maxY) {
+  for (const [title, lines] of sections) {
+    if (y > maxY - 6) break;
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.text(title, x, y); doc.setFont(undefined, 'normal'); y += 3.8;
+    doc.setFontSize(6.3);
+    for (const ln of lines) {
+      const t = doc.splitTextToSize(`• ${ln}`, width);
+      if (y + t.length * 2.7 > maxY) { doc.text('…', x, y); y = maxY; break; }
+      doc.text(t, x, y); y += t.length * 2.7 + 0.4;
+    }
+    y += 2.5;
+  }
+}
+
+/** Montagepagina van het project: plaatsingslijst, afwerkpanelen, obstakels en beslag van het hele project. */
+function drawProjectAssembly(doc, project, S, meta) {
+  const { w, h, m } = PAGE;
+  const items = projectParts(project, S).filter(it => !it.res.error);
+  let y = m + 12;
+  doc.setFontSize(11); doc.text('Montage: plaatsingslijst', m + 4, y); y += 6;
+  const cols = [['Kast', 14], ['Type', 52], ['B × H × D', 34], ['X', 16], ['Z', 16], ['Onderkant', 20], ['Hoek', 12], ['Bijzonder', 104]];
+  const head = () => {
+    doc.setFontSize(7); doc.setFont(undefined, 'bold');
+    let x = m + 4; for (const [t, cw] of cols) { doc.text(t, x, y); x += cw; }
+    doc.setFont(undefined, 'normal'); doc.setLineWidth(0.15); doc.line(m + 4, y + 1.2, w - m - 4, y + 1.2); y += 4.5;
+  };
+  head();
+  for (const { k, res, L } of items) {
+    const bijz = [];
+    for (const kant of ['links', 'rechts']) if (Number(k.paslat?.[kant]) > 0) bijz.push(`paslat ${kant} ${fmt(k.paslat[kant])}`);
+    if (k.uitsparing?.hoek) bijz.push(`uitsparing ${k.uitsparing.hoek} ${fmt(k.uitsparing.breedte)}×${fmt(k.uitsparing.diepte)}`);
+    if (k.schuin?.richting && k.schuin.richting !== 'geen') bijz.push(k.schuin.richting === 'lr' ? `trap ${k.schuin.laag === 'punt' ? 'punt' : `${k.schuin.hoek}°`} hoog ${k.schuin.hoog ?? 'links'}` : `dak ${k.schuin.hoek}°`);
+    if (k.greep === 'push') bijz.push('push-open'); else if (k.greep === 'greeplijst') bijz.push('greeploos'); else if (k.greep === 'tipon') bijz.push('TIP-ON');
+    if (k.zichtL) bijz.push('zicht links'); if (k.zichtR) bijz.push('zicht rechts');
+    if (res.warnings.length) bijz.push(`${res.warnings.length} opmerking(en)`);
+    const vals = [k.code, PRESETS.find(x => x.id === k.type)?.naam ?? k.type, `${fmt(k.breedte)} × ${fmt(k.hoogte)} × ${fmt(k.diepte)}`, fmt(L.x), fmt(L.z), fmt(L.y), `${fmt(Number(L.rot) || 0)}°`, bijz.join(', ')];
+    const lines = doc.splitTextToSize(vals[7], cols[7][1] - 2);
+    if (y + lines.length * 3.2 > h - m - 18) { doc.addPage(); titleBlock(doc, [`${meta.project} · montage (vervolg)`, ''], meta.datum); y = m + 12; head(); }
+    let x = m + 4;
+    vals.forEach((v, i) => { doc.text(i === 7 ? lines : doc.splitTextToSize(String(v), cols[i][1] - 2)[0], x, y); x += cols[i][1]; });
+    y += Math.max(1, lines.length) * 3.2 + 1;
+  }
+  doc.setFontSize(6.5); doc.text('X: vanaf links (achterwand), Z: vanaf de achterwand naar voor, onderkant: onderkant korpus boven de vloer (mm). Hoek: draaiing van de kast in bovenaanzicht.', m + 4, y + 1); y += 6;
+  // Afwerkpanelen, obstakels, opstelling.
+  const sections = [];
+  if (project.panelen?.length) sections.push(['Afwerkpanelen', project.panelen.map(pn => { const q = panelPart(pn, S); const c = cutInfo(q);
+    return `${q.naam}: ${fmt(c.L)} × ${fmt(c.B)} × ${fmt(q.dikte)} (${q.decor}); van X ${fmt(q.box.x)} / Y ${fmt(q.box.y)} / Z ${fmt(q.box.z)} tot X ${fmt(q.box.x + q.box.w)} / Y ${fmt(q.box.y + q.box.h)} / Z ${fmt(q.box.z + q.box.d)}`; })]);
+  const wbs = werkbladGeometry(project, S);
+  if (wbs.length) sections.push(['Werkbladen', wbs.flatMap(g => {
+    const mat = { plaat: 'zelf maken (plaat)', composiet: 'composiet/steen (bestellen)', hout: 'massief hout (bestellen)' }[g.wb.materiaal ?? 'plaat'];
+    const lines = [`${g.wb.naam || 'Werkblad'}: ${fmt(g.rect.lengte)} × ${fmt(g.rect.diepte)} × ${fmt(g.rect.dikte)} mm, ${mat}${g.wb.decor ? `, ${g.wb.decor}` : ''}; op ${g.ks.map(x => x.code).join(', ')}; bovenkant op ${fmt(g.L.y + g.rect.yTop + g.rect.dikte)} mm boven de vloer.`,
+      `   overstek voor ${fmt(g.wb.voor ?? 20)} mm voorbij de fronten, links ${fmt(g.wb.links || 0)}, rechts ${fmt(g.wb.rechts || 0)}; uiteinden: links ${g.wb.eindeLinks === 'verstek' ? 'verstek 45°' : 'recht'}, rechts ${g.wb.eindeRechts === 'verstek' ? 'verstek 45°' : 'recht'}.`];
+    for (const c of g.cut) lines.push(`   uitsparing ${c.naam}: ${fmt(c.b)} × ${fmt(c.d)} mm, midden op ${fmt(c.cx)} mm vanaf links, ${fmt(c.voor)} mm vanaf de voorkant.`);
+    if (Number(g.wb.spatHoogte) > 0) lines.push(`   spatwand ${fmt(g.rect.lengte)} × ${fmt(g.wb.spatHoogte)} × ${fmt(g.wb.spatDikte || 12)} mm tegen de muur.`);
+    return lines;
+  })]);
+  if (project.obstakels?.length) sections.push(['Obstakels', project.obstakels.map(o => `${o.naam}: X ${fmt(o.x)}, Z ${fmt(o.z)}, ${fmt(o.breedte)} × ${fmt(o.diepte)} mm${o.hoogte ? `, ${fmt(o.hoogte)} hoog` : ''}`)]);
+  const opst = [`Onderkant hangkasten: ${fmt(Number(project.bovenHoogte) || 1400)} mm boven de vloer.`];
+  if (project.koppelen !== false) opst.push('Plinten en greeplijsten van kasten tegen elkaar lopen door (één stuk); eerst de kasten onderling uitlijnen en verbinden.');
+  if (project.ruimte?.wanden?.length) opst.push(`Ruimte: ${project.ruimte.wanden.map((wd, i) => `wand ${i + 1} ${fmt(wd.lengte)} mm`).join(', ')}; hoogte ${fmt(project.ruimte.hoogte || 2600)} mm.`);
+  opst.push('Kasten waterpas zetten met de stelpoten vóór de plint; kasten onderling verbinden met verbindingsschroeven door de zijwanden.');
+  sections.push(['Opstelling', opst]);
+  const hw = {};
+  for (const { res } of items) for (const x of res.hardware) hw[x.naam] = (hw[x.naam] ?? 0) + x.aantal;
+  sections.push(['Beslag van het hele project', Object.entries(hw).sort((a, b) => a[0].localeCompare(b[0])).map(([n, c]) => `${c}× ${n}`)]);
+  const ord = {};
+  for (const { res } of items) for (const x of res.bestel ?? []) ord[x.naam] = (ord[x.naam] ?? 0) + x.aantal;
+  if (Object.keys(ord).length) sections.push(['Te bestellen (lades op maat)', Object.entries(ord).map(([n, c]) => `${c}× ${n}`)]);
+  const half = Math.ceil(sections.length / 2);
+  infoColumn(doc, sections.slice(0, half), m + 4, y + 4, 130, h - m - 16);
+  infoColumn(doc, sections.slice(half), m + 145, y + 4, 130, h - m - 16);
+  titleBlock(doc, [`${meta.project} · montage`, `${items.length} kasten${project.panelen?.length ? ` · ${project.panelen.length} afwerkpanelen` : ''}`], meta.datum);
+}
+
 /** Overzicht van een kast: vooraanzicht, zijaanzicht (doorsnede) en bovenaanzicht met hoofdmaten. */
 function drawCabinetOverview(doc, k, res, meta) {
   const { w, h, m } = PAGE;
@@ -236,7 +314,7 @@ function drawCabinetOverview(doc, k, res, meta) {
   const maxZ = Math.max(D, ...flat.map(p => p.box.z + p.box.d));
   const totW = maxX - minX, totH = maxY - minY;
   // Vooraanzicht, zijaanzicht en bovenaanzicht naast elkaar; rechts blijft plaats voor de lijst.
-  const s = Math.min((w - 2 * m - 80 - 75) / (2 * totW + maxZ), (h - 2 * m - 14 - 40) / Math.max(totH, maxZ));
+  const s = Math.min((w - 2 * m - 80 - 75) / (2 * totW + maxZ), (h - 2 * m - 14 - 58) / (totH + maxZ));
   // Vooraanzicht
   const fx = m + 22 - minX * s, fy = m + 18 + maxY * s;
   const FX = x => fx + x * s, FY = y => fy - y * s;
@@ -306,22 +384,53 @@ function drawCabinetOverview(doc, k, res, meta) {
   }
   doc.setFontSize(9);
   doc.text('Bovenaanzicht', tx, ty - 3);
-  // Onderdelen zonder bewerking (geen werktekening).
+  // Horizontale doorsnede B-B op halve hoogte, onder het vooraanzicht (X gelijk, voorkant naar onder).
+  const hy = H / 2, hzTop = FY(minY) + 16, HZ = z => hzTop + (z - Math.min(0, ...flat.map(p => p.box.z))) * s;
+  doc.setLineDashPattern([3, 1.5, 0.6, 1.5], 0); doc.setDrawColor(200, 40, 40);
+  doc.line(FX(minX) - 3, FY(hy), FX(maxX) + 3, FY(hy)); doc.setLineDashPattern([], 0);
+  doc.setFontSize(8); doc.setTextColor(200, 40, 40); doc.text('B', FX(minX) - 6, FY(hy) + 1); doc.text('B', FX(maxX) + 4, FY(hy) + 1); doc.setTextColor(0); doc.setDrawColor(0);
+  doc.setFontSize(9); doc.text(`Horizontale doorsnede B-B (op ${fmt(hy)} mm)`, FX(minX), hzTop - 3);
+  doc.setLineWidth(0.15);
+  for (const p of all.filter(p => !p.tilt && p.box.y <= hy && p.box.y + p.box.h >= hy)) {
+    const fill = p.rol === 'front' ? [250, 246, 238] : p.rol === 'rug' ? [215, 200, 175] : [235, 228, 214];
+    if (p.shape3d?.plane === 'xz') drawPoly(p.shape3d.pts.map(([u, v]) => [p.box.x + u, p.box.z + v]), FX, HZ, fill);
+    else { doc.setFillColor(...fill); doc.rect(FX(p.box.x), HZ(p.box.z), p.box.w * s, p.box.d * s, 'FD'); }
+  }
+  const zMax = Math.max(...flat.map(p => p.box.z + p.box.d)), zMin = Math.min(0, ...flat.map(p => p.box.z));
+  dimLine(doc, FX(maxX) + 5, HZ(zMin), FX(maxX) + 5, HZ(zMax), fmt(zMax - zMin));
+  dimLine(doc, FX(minX), HZ(zMax) + 5, FX(maxX), HZ(zMax) + 5, fmt(maxX - minX));
+  // Montagekader (voor de monteur): plaatsing, montage, fronten, beslag, onderdelen zonder bewerking, waarschuwingen.
+  const preset = PRESETS.find(x => x.id === k.type);
+  const L = meta.L;
+  const sections = [];
+  if (L) sections.push(['Plaatsing', [
+    `X ${fmt(L.x)} mm vanaf links, Z ${fmt(L.z)} mm vanaf achter${Number(L.rot) ? `, gedraaid ${fmt(L.rot)}°` : ''}.`,
+    `Onderkant korpus op ${fmt(L.y)} mm boven de vloer${P && preset?.groep !== 'Bovenkasten' ? ` (plint ${fmt(P)} mm)` : ''}; bovenkant op ${fmt(L.y + H)} mm.`]]);
+  const mont = [];
+  const zichtTxt = zl => zl ? 'Clamex P-14 (zichtzijde)' : 'deuvels + schroeven';
+  if (k.schuin?.richting && k.schuin.richting !== 'geen') mont.push(`Schuine kast (${k.schuin.richting === 'lr' ? 'trap' : 'dak'}${k.schuin.hoek ? `, ${k.schuin.hoek}°` : ''}): panelen met Clamex; schuine kanten gezaagd.`);
+  else mont.push(`Zijwand links: ${zichtTxt(k.zichtL)}; zijwand rechts: ${zichtTxt(k.zichtR)}.`);
+  mont.push(k.rug === 'groef' ? 'Rug in de groef schuiven en in bodem, regels en tussenbodems schroeven.' : k.rug === 'opgeschroefd' ? 'Rugpaneel achteraan opschroeven.' : k.wegneembareRug ? 'Geen vaste rug; wegneembare rugstrook tussen de legplankdragers schuiven.' : 'Geen rug.');
+  if (preset?.groep === 'Bovenkasten') mont.push('Ophangbeslag: 3 gaten Ø10 bovenaan in elke zijwand; ophangrail eerst waterpas monteren.');
+  if (k.plint === 'stelpoten' && P) mont.push(`Stelpoten (puntjes onder de bodem), plint ${fmt(P)} mm hoog${k.plintTrespa ? ' op Trespa' : ''}, ${fmt(S0plint(k))} mm achter de front.`);
+  if (k.plint === 'vast' && P) mont.push(`Vaste plint ${fmt(P)} mm (zijwanden tot op de vloer).`);
+  const gTxt = { greep: `greep${k.greepHart ? ` ${k.greepHart} mm hart-op-hart` : ''} (gaten geboord)`, tipon: 'TIP-ON', push: 'push-open: drevels in de boringen Ø10 × 80 van voor in het korpus; geen dempers', greeplijst: 'greeploos (houten greeplijst)' };
+  mont.push(`Fronten: ${gTxt[k.greep] ?? k.greep}.`);
+  for (const kant of ['links', 'rechts']) if (Number(k.paslat?.[kant]) > 0) mont.push(`Paslat ${kant} ${fmt(k.paslat[kant])} mm: kastpaslat van buitenaf vastschroeven, frontpaslat met Clamex erop.`);
+  if (k.uitsparing?.hoek) mont.push(`Uitsparing ${k.uitsparing.hoek} achteraan ${fmt(k.uitsparing.breedte)} × ${fmt(k.uitsparing.diepte)} mm (koker/kolom), binnenwanden met deuvels en schroeven.`);
+  sections.push(['Montage', mont]);
+  const fr = all.filter(p => p.rol === 'front' || (p.rol === 'paslat' && p.mat === 'front'));
+  if (fr.length) sections.push(['Fronten', fr.map(p => {
+    const pots = p.ops.filter(o => o.naam === 'Scharnierpot');
+    const kant = pots.length ? (pots[0].u < p.uLen / 2 ? 'links' : 'rechts') : '';
+    return `${p.naam}: ${fmt(p.uLen)} × ${fmt(p.vLen)} (${p.decor ?? ''})${pots.length ? `; ${pots.length} scharnieren ${kant} op ${pots.map(o => fmt(o.v)).join(' / ')} van onder` : ''}`;
+  })]);
+  if (res.hardware.length) sections.push(['Beslag', res.hardware.map(hw => `${hw.aantal}× ${hw.naam}`)]);
+  if (res.bestel?.length) sections.push(['Te bestellen', res.bestel.map(b => `${b.aantal}× ${b.naam}`)]);
   const plain = all.filter(p => !p.ops.length && p.rol !== 'zijwand');
-  let ly = m + 20;
-  const lx = w - m - 75;
-  doc.setFontSize(9);
-  doc.text('Onderdelen zonder bewerking', lx, ly); ly += 5;
-  doc.setFontSize(7);
-  for (const p of plain.slice(0, 40)) {
-    const c = cutInfo(p);
-    doc.text(`${p.naam}: ${fmt(c.L)} × ${fmt(c.B)} × ${fmt(p.dikte)}`, lx, ly); ly += 3.4;
-  }
-  if (plain.length > 40) doc.text(`… en nog ${plain.length - 40}`, lx, ly);
-  if (res.warnings.length) {
-    ly += 6; doc.setFontSize(8); doc.text('Waarschuwingen', lx, ly); ly += 4; doc.setFontSize(6.5);
-    for (const wn of res.warnings) { const t = doc.splitTextToSize(wn, 72); if (ly + t.length * 3 > h - m - 16) break; doc.text(t, lx, ly); ly += t.length * 3 + 1; }
-  }
+  if (plain.length) sections.push(['Onderdelen zonder bewerking', plain.map(p => { const c = cutInfo(p); return `${p.naam}: ${fmt(c.L)} × ${fmt(c.B)} × ${fmt(p.dikte)}`; })]);
+  if (res.warnings.length) sections.push(['Let op', res.warnings]);
+  infoColumn(doc, sections, w - m - 75, m + 20, 72, h - m - 16);
   titleBlock(doc, [`${k.code} · ${PRESETS.find(x => x.id === k.type)?.naam ?? ''}`, `${meta.project} · ${fmt(W)} × ${fmt(H)} × ${fmt(D)} mm${P ? ` · plint ${fmt(P)}` : ''}`], meta.datum);
 }
 
@@ -340,6 +449,7 @@ function drawProjectOverview(doc, project, S, meta) {
   const all = [];       // { wb, p, k }
   for (const it of items) for (const p of it.parts) if (!p.tilt) all.push({ wb: worldBox(p.box, it.L), p, k: it.k });
   for (const pn of project.panelen ?? []) { const p = panelPartFull(pn, S); const b = p.box; all.push({ wb: { x0: b.x, x1: b.x + b.w, y0: b.y, y1: b.y + b.h, z0: b.z, z1: b.z + b.d }, p, k: null }); }
+  for (const g of werkbladGeometry(project, S)) for (const p of g.parts.filter(q => q.rol !== 'werkblad-uitsparing')) all.push({ wb: worldBox(p.box, g.L), p, k: null });
   if (!all.length) return;
   const cabs = items.map(it => {
     const ws = all.filter(a => a.k === it.k).map(a => a.wb);
@@ -358,7 +468,7 @@ function drawProjectOverview(doc, project, S, meta) {
   doc.setLineWidth(0.15);
   // Korpus per kast (lijn), daarna plinten, panelen en fronten (gevuld), van achter naar voor.
   for (const c of cabs) rect(FX(c.body.x0), FY(c.body.y0), FX(c.body.x1), FY(c.body.y1));
-  const vis = all.filter(a => ['front', 'plint', 'afwerk', 'paslat', 'greeplijst', 'trespa'].includes(a.p.rol) || (a.p.rol === 'zijwand' && a.k?.zichtL + a.k?.zichtR)).sort((a, b) => a.wb.z1 - b.wb.z1);
+  const vis = all.filter(a => ['front', 'plint', 'afwerk', 'paslat', 'greeplijst', 'trespa', 'werkblad', 'spatwand'].includes(a.p.rol) || (a.p.rol === 'zijwand' && a.k?.zichtL + a.k?.zichtR)).sort((a, b) => a.wb.z1 - b.wb.z1);
   for (const a of vis) rect(FX(a.wb.x0), FY(a.wb.y0), FX(a.wb.x1), FY(a.wb.y1), a.p.rol === 'front' || a.p.rol === 'afwerk' || a.p.mat === 'front' ? [250, 246, 238] : [235, 228, 214]);
   doc.setFontSize(7);
   for (const c of cabs) doc.text(c.k.code, (FX(c.body.x0) + FX(c.body.x1)) / 2, (FY(c.body.y0) + FY(c.body.y1)) / 2, { align: 'center' });
@@ -379,11 +489,20 @@ function drawProjectOverview(doc, project, S, meta) {
   doc.setLineDashPattern([3, 1.5, 0.6, 1.5], 0); doc.setDrawColor(200, 40, 40);
   doc.line(FX(xs), FY(Y1) + 2, FX(xs), FY(Y0) - 2); doc.setLineDashPattern([], 0);
   doc.setFontSize(8); doc.setTextColor(200, 40, 40); doc.text('A', FX(xs) + 1, FY(Y1) + 4); doc.text('A', FX(xs) + 1, FY(Y0) - 3); doc.setTextColor(0); doc.setDrawColor(0);
-  // Bovenaanzicht (plattegrond): X naar rechts, voorkant naar onder.
+  // Horizontale doorsnede B-B door de onderkasten (X naar rechts, voorkant naar onder); hangkasten gestreept erboven.
+  const base = cabs.filter(c => c.body.y0 < 500);
+  const hB = base.length ? Math.min(...base.map(c => (c.body.y0 + c.body.y1) / 2)) : (Y0 + Y1) / 2;
+  doc.setLineDashPattern([3, 1.5, 0.6, 1.5], 0); doc.setDrawColor(200, 40, 40);
+  doc.line(FX(X0) - 3, FY(hB), FX(X1) + 3, FY(hB)); doc.setLineDashPattern([], 0);
+  doc.setFontSize(8); doc.setTextColor(200, 40, 40); doc.text('B', FX(X1) + 4, FY(hB) + 1); doc.setTextColor(0); doc.setDrawColor(0);
   const py = FY(Y0) + 26, PX = FX, PZ = z => py + (z - Z0) * s;
-  doc.setFontSize(9); doc.text('Bovenaanzicht', PX(X0), py - 3);
+  doc.setFontSize(9); doc.text(`Horizontale doorsnede B-B (op ${fmt(hB)} mm)`, PX(X0), py - 3);
+  doc.setLineWidth(0.15);
+  for (const a of all.filter(a => a.wb.y0 <= hB && a.wb.y1 >= hB)) {
+    const fill = a.p.rol === 'front' || a.p.rol === 'afwerk' || a.p.mat === 'front' ? [250, 246, 238] : a.p.rol === 'rug' ? [215, 200, 175] : [235, 228, 214];
+    rect(PX(a.wb.x0), PZ(a.wb.z1), PX(a.wb.x1), PZ(a.wb.z0), fill);
+  }
   doc.setLineWidth(0.2);
-  for (const c of cabs) { rect(PX(c.x0), PZ(c.z1), PX(c.x1), PZ(c.z0), c.body.y0 >= 500 ? null : [245, 240, 230]); }
   doc.setLineDashPattern([1.5, 1], 0);
   for (const c of cabs.filter(c => c.body.y0 >= 500)) rect(PX(c.x0), PZ(c.z1), PX(c.x1), PZ(c.z0));
   doc.setLineDashPattern([], 0);
@@ -415,12 +534,16 @@ function technicalDrawingPdf(project, S, kasten = project.kasten) {
   const datum = new Date().toLocaleDateString('nl-BE');
   let first = true;
   const newPage = () => { if (!first) doc.addPage(); first = false; };
-  if (kasten === project.kasten && project.kasten.length) { newPage(); drawProjectOverview(doc, project, S, { project: project.naam, datum }); }
+  if (kasten === project.kasten && project.kasten.length) {
+    newPage(); drawProjectOverview(doc, project, S, { project: project.naam, datum });
+    newPage(); drawProjectAssembly(doc, project, S, { project: project.naam, datum });
+  }
+  const layout = projectLayout(project);
   for (const k of kasten) {
     const res = buildCabinet(k, S);
     if (res.error) continue;
     newPage();
-    drawCabinetOverview(doc, k, res, { project: project.naam, datum });
+    drawCabinetOverview(doc, k, res, { project: project.naam, datum, L: layout[project.kasten.indexOf(k)] });
     const names = mprNames(k.code, res.parts);
     for (const p of res.parts) {
       if (!names.has(p.id)) continue;

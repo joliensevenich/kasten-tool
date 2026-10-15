@@ -110,7 +110,8 @@ const DEFAULT_SETTINGS = {
   verluchtingSpleet: 20,
   plintInsprong: 50,
   greeplijstBinnenHoogte: 40,  // greepruimte; buitenmaat = + plaat (bovenaan, L) of + 2 × plaat (tussen fronten, C)
-  greeplijstBinnenDiepte: 20,  // buitenmaat = + plaat
+  greeplijstBinnenDiepte: 20,
+  greepGrijp: 10,              // greeploos met greeplijst: front steekt zoveel uit in de greepopening  // buitenmaat = + plaat
   greepHartafstand: 160,
   greepRand: 40,
   greepVanBoven: 100,
@@ -119,6 +120,16 @@ const DEFAULT_SETTINGS = {
   blindPlaatTussen: 32,     // afstand tussen de twee gaten, boven elkaar
   blindPlaatDia: 5,
   blindPlaatDiepte: 10,
+  spoelbakUitsparingB: 760,  // werkblad: uitsparing boven een spoelbakkast (breedte × diepte)
+  spoelbakUitsparingD: 440,
+  kookplaatUitsparingB: 560, // werkblad: uitsparing boven een kookplaatkast
+  kookplaatUitsparingD: 490,
+  binnenladeOpvul: 20,       // binnenladen: dikte van de verdikkingsblokken (langs de scharnieren)
+  binnenladeTerug: 25,       // binnenfront zoveel achter de voorkant van de kast (ruimte voor deur en scharnieren)
+  binnenfrontExtra: 30,      // binnenfront = hoogte laderug + dit
+  binnenladeTussen: 40,      // ruimte tussen de binnenladen
+  plintBakDikte: 18,         // plintenbak in multiplex
+  plintBakAfstand: 600,      // tussenlatten in de plintenbak ongeveer om de
   hangGreepUitsteek: 30,     // hangkast greeploos: fronten steken zoveel onderaan uit (vastnemen langs onder)
   pushDia: 10,               // push-open: boring van voor in het korpus voor de drevel
   pushDiepte: 80,
@@ -156,7 +167,8 @@ const DEFAULT_SETTINGS = {
   decorFront: 'H1180',
   blum: {
     // Ladetypes: code en hoogte van de laderug (benaderend; controleren met Blum).
-    LEGRABOX: { bodemB: 35, bodemD: 10, rugB: 35, rugH: 120, gaten: [37, 261, 357, 453], gatHoogte: 37,
+    // LEGRABOX-catalogus (zaagmaten voor 16 mm): bodem LW − 35 × NL − 10, rug LW − 38.
+    LEGRABOX: { bodemB: 35, bodemD: 10, rugB: 38, rugH: 120, gaten: [37, 261, 357, 453], gatHoogte: 37,
       // frontGaten: EXPANDO-frontbevestiging, hoogtes van de gaten vanaf de onderkant van de lade (Blum LEGRABOX-catalogus).
       types: [{ code: 'N', rugH: 70, frontGaten: [45.5, 61.5] }, { code: 'M', rugH: 90, frontGaten: [51, 83], frontArtikel: 'Häfele 550.75.064' }, { code: 'K', rugH: 128, frontGaten: [51, 83] },
         { code: 'C', rugH: 177, frontGaten: [51, 83, 179, 211] }, { code: 'F', rugH: 241, frontGaten: [51, 83, 179, 211, 243] }] },
@@ -286,8 +298,9 @@ function spreadPositions(len, step, marge) {
   return Array.from({ length: n }, (_, i) => marge + i * (len - 2 * marge) / (n - 1));
 }
 
-function hingeCount(h) {
-  return h <= 900 ? 2 : h <= 1600 ? 3 : h <= 2000 ? 4 : 5;
+/** Aantal scharnieren volgens de Blum-tabel (deurhoogte); een deur breder dan 600 mm (zwaarder) krijgt er één bij. */
+function hingeCount(h, w = 0) {
+  return (h <= 900 ? 2 : h <= 1600 ? 3 : h <= 2000 ? 4 : 5) + (w > 600 ? 1 : 0);
 }
 
 // MARK: - Kast opbouwen
@@ -357,6 +370,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   const parts = [];
   const hw = {};
   const count = (name, n = 1) => { hw[name] = (hw[name] ?? 0) + n; };
+  // Te bestellen (op maat gemaakte lades, ...): aparte lijst naast het beslag.
+  const ord = {};
+  const order = (name, n = 1) => { ord[name] = (ord[name] ?? 0) + n; };
 
   if (k.rug === 'groef' && S.groefDiepte >= S.plaat) warnings.push(`De rugwandgroef (${S.groefDiepte} mm diep) is te diep voor een plaat van ${S.plaat} mm.`);
   if (k.rug === 'groef' && S.rugInsprong + S.groefBreedte >= W / 2) warnings.push('De rugwandgroef past niet in deze kast.');
@@ -780,6 +796,20 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       box: { x: 0, y: -P + td, z: D - S.plintInsprong - t, w: W, h: P - td, d: t }, uLen: W, vLen: P - td });
     if (td) trespa(0, W);
     count('Stelpoot', 4 + (W - 2 * t >= S.pootMiddenVoor ? 1 : 0) + (W - 2 * t >= S.pootMiddenAchter ? 1 : 0));
+  } else if (k.plint === 'bak' && P) {
+    // Plintenbak in multiplex: kader onder de kast (voor, achter, zijkanten en tussenlatten om de ~600 mm).
+    const bt = S.plintBakDikte, zF = D - S.plintInsprong - (k.plintAfwerk !== false ? t : 0) - bt;
+    const lat = (naam, x, z, w, d) => add({ naam, rol: 'plintbak', mat: 'korpus', dikte: bt, grain: 'u', edges: {}, decor: 'Multiplex', plaattype: 'Multiplex',
+      box: { x, y: -P, z, w, h: P, d }, uLen: Math.max(w, d), vLen: P });
+    lat('Plintenbak voor', 0, zF, W, bt);
+    lat('Plintenbak achter', 0, zBack, W, bt);
+    const inner = zF - (zBack + bt);
+    const n = Math.max(2, Math.ceil((W - bt) / S.plintBakAfstand) + 1);
+    for (let i = 0; i < n; i++) lat(i === 0 ? 'Plintenbak zijkant links' : i === n - 1 ? 'Plintenbak zijkant rechts' : 'Plintenbak tussenlat', i * (W - bt) / (n - 1), zBack + bt, bt, inner);
+    if (k.plintAfwerk !== false) add({ id: 'plint', naam: 'Plint (op de bak)', rol: 'plint', mat: 'korpus', dikte: t, grain: 'u', edges: { v1: 0 },
+      box: { x: 0, y: -P + td, z: D - S.plintInsprong - t, w: W, h: P - td, d: t }, uLen: W, vLen: P - td });
+    if (td) trespa(0, W);
+    count('Plintenbak (multiplex)');
   } else if (k.plint === 'vast' && P) {
     for (const s of sides) s.ops.push({ kind: 'uitsparing', u: Dk - S.plintInsprong, v: 0, w: S.plintInsprong, h: P, naam: 'Plintuitsparing' });
     add({ id: 'plint', naam: 'Plint (vast)', rol: 'plint', mat: 'korpus', dikte: t, grain: 'u',
@@ -860,6 +890,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     }
     count('Push-open drevel');
   };
+
+  const damperReq = [];      // dempers: pas geplaatst als het hele korpus er is (zie verderop)
 
   const handleHoles = (p, vertical, freeLeft) => {
     if (k.greep !== 'greep') return;
@@ -1027,11 +1059,59 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       if (z.index === zones.length - 1) fy1 += Number(k.uitstekBoven) || 0;
     }
 
+    // Binnenladen achter de deur: op verdikkingsblokken (zodat ze langs de scharnieren kunnen), met een binnenfront.
+    let binnenTop = null;
+    if (s.type === 'deur' && Number(s.binnenladen) > 0) {
+      const nB = Number(s.binnenladen);
+      const b = S.blum[s.binnenSerie ?? s.serie ?? 'LEGRABOX'] ?? S.blum.LEGRABOX;
+      const serieB = s.binnenSerie ?? 'LEGRABOX';
+      const lt = (b.types ?? []).find(x => x.code === s.binnenType) ?? (b.types ?? []).find(x => x.code === 'M') ?? (b.types ?? [])[0];
+      const ltName = `${serieB}${lt ? ` ${lt.code}` : ''}`, rugH = lt?.rugH ?? b.rugH;
+      const op = S.binnenladeOpvul, terug = S.binnenladeTerug;
+      const zFront = D - frontInset - terug;                  // voorkant van het binnenfront
+      const nlB = NL_LIST.filter(n => n <= zFront - rugFront - 10).pop();
+      const lw = W - 2 * t - 2 * op;                          // binnenbreedte tussen de blokken
+      const fh = rugH + S.binnenfrontExtra, pitch = fh + S.binnenladeTussen;
+      if (!nlB) warnings.push('Binnenladen: de kast is niet diep genoeg voor een ladegeleider.');
+      else for (let i = 0; i < nB; i++) {
+        const y0 = z.open0 + S.binnenladeTussen / 2 + i * pitch;
+        if (y0 + fh > z.open1 - 10) { warnings.push(`Binnenlade ${i + 1} past niet meer in het vak.`); break; }
+        const yRun = y0 + b.gatHoogte;
+        // Verdikkingsblokken links en rechts (geleider erop geschroefd, blok door de zijwand vast).
+        for (const left of [true, false]) {
+          const blk = add({ naam: `Verdikkingsblok binnenlade ${i + 1} ${left ? 'links' : 'rechts'}`, rol: 'opvul', mat: 'korpus', dikte: op, grain: 'u', edges: {},
+            box: { x: left ? t : W - t - op, y: yRun - 20, z: zFront - nlB, w: op, h: 60, d: nlB }, uLen: nlB, vLen: 60 });
+          for (const g of b.gaten) if (g <= nlB - S.geleiderAchterVrij) blk.ops.push({ kind: 'boring', face: 'binnen', u: nlB - g, v: 20, dia: S.geleiderDia, diepte: Math.min(S.geleiderDiepte, op - 3), naam: `Ladegeleider ${serieB}` });
+          for (const u of [40, nlB - 40]) blk.ops.push({ kind: 'boring', face: 'binnen', u, v: 45, dia: S.schroefDia, diepte: op, doorgaand: true, naam: 'Schroef blok' });
+        }
+        count('Verdikkingsblok', 2);
+        // Lade: zelf maken of op maat bestellen.
+        const bodemD = nlB - b.bodemD;
+        if (s.binnenUitvoering === 'opmaat') order(`Binnenlade op maat ${ltName} NL ${nlB} (${k.code}): breedte tussen de blokken ${r1(lw)} mm, bodem ${r1(lw - b.bodemB)} × ${r1(bodemD)}, rug ${r1(lw - b.rugB)} × ${r1(rugH)}`);
+        else {
+          add({ naam: `Binnenlade bodem (${ltName})`, rol: 'lade', mat: 'lade', dikte: S.ladeBodemDikte, grain: 'u', edges: {},
+            box: { x: t + op + b.bodemB / 2, y: yRun, z: zFront - bodemD - 5, w: lw - b.bodemB, h: S.ladeBodemDikte, d: bodemD }, uLen: lw - b.bodemB, vLen: bodemD });
+          add({ naam: `Binnenlade rug (${ltName})`, rol: 'lade', mat: 'lade', dikte: S.ladeBodemDikte, grain: 'u', edges: {},
+            box: { x: t + op + b.rugB / 2, y: yRun + S.ladeBodemDikte, z: zFront - bodemD - 5, w: lw - b.rugB, h: rugH, d: S.ladeBodemDikte }, uLen: lw - b.rugB, vLen: rugH });
+        }
+        // Binnenfront (in het decor van het korpus), met de frontbevestiging.
+        const bf = add({ naam: `Binnenfront ${i + 1}`, rol: 'binnenfront', mat: 'korpus', dikte: t, grain: 'u', edges: { u0: S.bandKorpus, u1: S.bandKorpus, v0: S.bandKorpus, v1: S.bandKorpus }, bandPlaat: true,
+          box: { x: t + op + 1, y: y0, z: zFront - t, w: lw - 2, h: fh, d: t }, uLen: lw - 2, vLen: fh });
+        const fg = lt?.frontGaten ?? DEFAULT_SETTINGS.blum[serieB]?.types?.find(x => x.code === lt?.code)?.frontGaten;
+        if (S.frontBevestiging && fg?.length) for (const xc of [t + op + S.frontBevZij, W - t - op - S.frontBevZij]) for (const h of fg) {
+          const fv = yRun + h - bf.box.y;
+          if (fv > 5 && fv < bf.vLen - 5) bf.ops.push({ kind: 'boring', face: 'binnen', u: xc - bf.box.x, v: fv, dia: S.frontBevDia, diepte: S.frontBevDiepte, naam: 'Frontbevestiging' });
+        }
+        count(`Binnenlade ${ltName} NL ${nlB}`);
+        binnenTop = y0 + fh;
+      }
+    }
+
     if (s.type === 'deur' || s.type === 'klep') {
       if (greeplijst) {
         const top = greepTop(z);
         addGreeplijst('L', top - gh - t, 'boven');
-        fy1 = top - gh;
+        fy1 = top - gh + S.greepGrijp;     // front steekt greepGrijp uit in de greepopening (om vast te nemen)
       }
       let x0 = frontX0, x1 = frontX1;
       const blind = Number(k.blindBreedte) || 0;
@@ -1058,7 +1138,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           const hingeLeft = n === 1 ? (blindPart ? k.blindKant !== 'rechts' : k.scharnierKant !== 'rechts') : i === 0;
           const door = front({ naam: n === 1 ? 'Deur' : (i === 0 ? 'Deur links' : 'Deur rechts'), x0: dx0, y0: fy0, x1: dx0 + dw, y1: fy1 });
           if (door.vLen < 2 * S.scharnierRand + 60) warnings.push(`${door.naam} is maar ${r1(door.vLen)} mm hoog: te laag voor scharnieren. Pas de hoogtes van de vakken aan.`);
-          const hc = hingeCount(door.vLen);
+          const hc = hingeCount(door.vLen, door.uLen);
           // Scharnieren gelijk verdeeld, maar altijd binnen het korpus (ook als de deur uitsteekt).
           const pMin = Math.max(S.scharnierRand, -Pv + S.scharnierRand - door.box.y);
           const hingeEdgeH = door.edgeH ? (hingeLeft ? door.edgeH.u0 : door.edgeH.u1) : door.vLen;
@@ -1080,7 +1160,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           }
           // Niet op een regel, tussenbodem of greeplijst: het plaatje (± helft) mag die panelen niet raken.
           // Zo nodig per 32 mm verschuiven (blijft op het raster), naar het midden van de deur toe.
-          const obstacles = parts.filter(x => (x.rol === 'liggend' || x.rol === 'greeplijst') && x.box.z + x.box.d > D - 60)
+          const obstacles = parts.filter(x => (x.rol === 'liggend' || x.rol === 'greeplijst' || x.rol === 'opvul') && x.box.z + x.box.d > D - 60)
             .map(x => [x.box.y - S.scharnierVrij, x.box.y + x.box.h + S.scharnierVrij]);
           const half = S.plaatjeHoogte / 2;
           const blocked = c => obstacles.some(([a, b]) => c + half > a && c - half < b) || c - half < -Pv || c + half > Math.min(H, slopeLimit);
@@ -1125,10 +1205,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           // Dempers: twee gaten aan de openingskant, bij de boven- en onderhoek (niet bij push-open: dan drukt de deur niet in).
           if (S.dempers && k.greep !== 'push') {
             const du = hingeLeft ? door.uLen - S.demperRand : S.demperRand;
-            // Binnen de hoogte van de zijwand blijven (ook als de deur uitsteekt).
-            const lo = Math.max(S.demperRand, -Pv - door.box.y + S.demperRand), hi = Math.min((door.shape ? door.shape[3][1] + (door.shape[2][1] - door.shape[3][1]) * du / door.uLen - 6 : door.vLen) - S.demperRand, H - door.box.y - S.demperRand);
-            for (const dv of [lo, hi]) door.ops.push({ kind: 'boring', face: 'binnen', u: du, v: dv, dia: S.demperDia, diepte: S.demperDiepte, naam: 'Demper' });
-            count('Demper', 2);
+            const top = door.shape ? door.shape[3][1] + (door.shape[2][1] - door.shape[3][1]) * du / door.uLen - 6 : door.vLen;
+            damperReq.push({ f: door, du, lo: S.demperRand, hi: top - S.demperRand, mode: 'hoeken' });
           }
           if (k.greep === 'push') pushBore(door, !hingeLeft, n);
           if (k.greep === 'tipon') {
@@ -1141,7 +1219,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         }
         if (k.greep === 'tipon' && n === 2) warnings.push('TIP-ON bij twee deuren: de plaats van de TIP-ON-boringen nog bepalen.');
       }
-      shelves(z, Number(s.legplanken) || 0, s);
+      shelves(binnenTop != null ? { ...z, open0: binnenTop + S.binnenladeTussen } : z, Number(s.legplanken) || 0, s);
     } else if (s.type === 'lade') {
       if (s.stijlen?.length || s.vasteLegplanken?.length) warnings.push('Middenstijlen en vaste legplanken in een ladevak worden niet gemaakt: de lades lopen over de volle breedte.');
       const n = Math.max(1, Number(s.lades) || 1);
@@ -1165,12 +1243,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         const ltName = `${s.serie}${lt ? ` ${lt.code}` : ''}`;
         const rugH = lt?.rugH ?? b.rugH;
         const top = yy + fh;
-        const f = front({ naam: n === 1 ? 'Ladefront' : `Ladefront ${i + 1}`, x0: frontX0, y0: yy, x1: frontX1, y1: top });
+        // Met een greeplijst steekt het front greepGrijp uit in de greepopening erboven (om vast te nemen).
+        const f = front({ naam: n === 1 ? 'Ladefront' : `Ladefront ${i + 1}`, x0: frontX0, y0: yy, x1: frontX1, y1: greeplijst ? top + S.greepGrijp : top });
         handleHoles(f, false);
         // Dempers: links en rechts op halve hoogte, ter hoogte van de zijwanden.
         if (S.dempers && k.greep !== 'push') {
-          for (const du of [S.demperRand, f.uLen - S.demperRand]) f.ops.push({ kind: 'boring', face: 'binnen', u: du, v: f.vLen / 2, dia: S.demperDia, diepte: S.demperDiepte, naam: 'Demper' });
-          count('Demper', 2);
+          for (const du of [S.demperRand, f.uLen - S.demperRand]) damperReq.push({ f, du, lo: S.demperRand, hi: f.vLen - S.demperRand, mode: 'midden' });
         }
         if (k.greep === 'push') pushBore(f, true, 1, true);
         if (greeplijst) addGreeplijst(i === n - 1 ? 'L' : 'C', top - t, i === n - 1 ? 'boven' : `lade ${i + 1}`);
@@ -1178,10 +1256,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         const openBottom = i === 0 ? z.open0 : greeplijst ? yy + t : yy - v / 2;
         if (nl) {
           const bodemD = nl - b.bodemD;
-          const lb = S.ladeBodemDikte, sb = S.ladeSponningBreedte, sd = S.ladeSponningDiepte;
-          const bodem = add({ naam: `Ladebodem (${ltName})`, rol: 'lade', mat: 'lade', dikte: lb, grain: 'u',
-            box: { x: t + (lw - (lw - b.bodemB)) / 2, y: openBottom + b.gatHoogte, z: D - frontInset - bodemD - 5, w: lw - b.bodemB, h: lb, d: bodemD },
-            uLen: lw - b.bodemB, vLen: bodemD });
+          // Op maat bestellen: geen bodem en rug in de zaaglijst, maar een regel op de bestellijst met alle maten.
+          const opMaat = s.uitvoering === 'opmaat';
+          if (opMaat) order(`Lade op maat ${ltName} NL ${nl} (${k.code}): binnenbreedte kast ${r1(lw)} mm, bodem ${r1(lw - b.bodemB)} × ${r1(bodemD)}, rug ${r1(lw - b.rugB)} × ${r1(rugH)}, front ${r1(f.uLen)} × ${r1(f.vLen)}`);
           // Snelspan-frontbevestiging (EXPANDO): per kant gaten Ø10 boven elkaar, 14 mm van de binnenkant van de zijwand,
           // op de hoogtes van het ladetype vanaf de onderkant van de lade.
           const fg = lt?.frontGaten ?? DEFAULT_SETTINGS.blum[s.serie]?.types?.find(x => x.code === lt?.code)?.frontGaten;
@@ -1195,6 +1272,11 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
             const art = lt?.frontArtikel ?? DEFAULT_SETTINGS.blum[s.serie]?.types?.find(x => x.code === lt?.code)?.frontArtikel;
             count(`Frontbevestiging ${s.serie} ${lt.code}${art ? ` (${art})` : ''} (paar)`);
           }
+          if (!opMaat) {
+          const lb = S.ladeBodemDikte, sb = S.ladeSponningBreedte, sd = S.ladeSponningDiepte;
+          const bodem = add({ naam: `Ladebodem (${ltName})`, rol: 'lade', mat: 'lade', dikte: lb, grain: 'u',
+            box: { x: t + (lw - (lw - b.bodemB)) / 2, y: openBottom + b.gatHoogte, z: D - frontInset - bodemD - 5, w: lw - b.bodemB, h: lb, d: bodemD },
+            uLen: lw - b.bodemB, vLen: bodemD });
           // Sponning onderaan langs links en rechts, zodat de bodem op het beslag 16 mm dik is.
           if (sd > 0 && sb > 0) for (const u of [sb / 2, bodem.uLen - sb / 2]) {
             bodem.ops.push({ kind: 'groef', face: 'onder', frees: true, u1: u, v1: 0, u2: u, v2: bodem.vLen, breedte: sb, diepte: sd, naam: 'Sponning beslag' });
@@ -1212,6 +1294,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           // Sponning aan beide uiteinden (achterkant), zodat de rug in het beslag 16 mm dik is.
           if (sd > 0 && sb > 0) for (const u of [sb / 2, rug.uLen - sb / 2]) {
             rug.ops.push({ kind: 'groef', face: 'achter', frees: true, u1: u, v1: 0, u2: u, v2: rug.vLen, breedte: sb, diepte: sd, naam: 'Sponning beslag' });
+          }
           }
           for (const sd of sides) for (const g of b.gaten) {
             if (g <= nl - S.geleiderAchterVrij && g < Dk) sd.ops.push({ kind: 'boring', face: 'binnen', u: Dk - g, v: sideV(openBottom + b.gatHoogte), dia: S.geleiderDia, diepte: S.geleiderDiepte, naam: `Ladegeleider ${s.serie}` });
@@ -1282,10 +1365,16 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     // Greeploos: de greeplijsten lopen door over de paslat; de frontpaslat wordt daar onderbroken (een stuk per front)
     // en de kastpaslat krijgt dezelfde uitsparing als de zijwand.
     const grips = parts.filter(x => x.rol === 'greeplijst' && /staand/.test(x.naam)).map(x => [x.box.y, x.box.y + x.box.h, D - x.box.z]).sort((a2, b2) => a2[0] - b2[0]);
+    // Stukken frontpaslat: even hoog als de fronten ernaast; fronten met enkel een voeg ertussen vormen één stuk,
+    // bij greeploos is er per front (tussen de greeplijsten) een stuk.
+    const adj = parts.filter(x => x.rol === 'front' && (left ? Math.abs(x.box.x - frontX0) < 1 : Math.abs(x.box.x + x.box.w - frontX1) < 1))
+      .map(x => [x.box.y, x.box.y + x.box.h]).sort((a2, b2) => a2[0] - b2[0]);
     const segs = [];
-    let y0 = fY0;
-    for (const [g0, g1] of grips) { if (g0 > y0 + 20 && g0 < fY1) segs.push([y0, Math.min(g0, fY1)]); if (g1 > y0) y0 = g1; }
-    if (fY1 > y0 + 20) segs.push([y0, fY1]);
+    for (const [a0, a1] of adj) {
+      const last = segs[segs.length - 1];
+      if (last && a0 - last[1] <= v + 0.5) last[1] = Math.max(last[1], a1); else segs.push([a0, a1]);
+    }
+    if (!segs.length) segs.push([fY0, fY1]);
     const fps = segs.map(([s0, s1], i) => add({ id: `paslat-front-${kant}${segs.length > 1 ? `-${i + 1}` : ''}`, naam: `Frontpaslat ${kant}${segs.length > 1 ? ` ${i + 1}` : ''}`, rol: 'paslat', mat: 'front', dikte: fd, grain: 'v',
       edges: { u0: left ? 0 : S.bandFront, u1: left ? S.bandFront : 0, v0: S.bandFront, v1: S.bandFront },
       box: { x: xf, y: s0, z: D, w: pw, h: s1 - s0, d: fd }, uLen: pw, vLen: s1 - s0 }));
@@ -1327,6 +1416,52 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       count('Lamello Clamex P-14');
     }
     // De kastpaslat wordt van buitenaf vastgeschroefd: geen schroefgaten in de zijwand.
+  }
+
+  // Dempers: alleen waar ze tegen het korpus drukken (voorkant van zijwand, bodem, top, regels, tussenbodems,
+  // latten van de greeplijst, kastpaslat), niet in de greepopening of in de lucht.
+  if (damperReq.length) {
+    const r = S.demperDia / 2 + 2;
+    const surf = parts.filter(q => !['front', 'lade', 'legplank', 'rug', 'trespa', 'plint', 'afwerk'].includes(q.rol) && !(q.rol === 'paslat' && q.mat === 'front')
+      && q.box.z + q.box.d >= D - frontInset - 0.5 && !q.tilt);
+    const rangesAt = x => {
+      const out = [];
+      for (const q of surf) {
+        if (x < q.box.x - 0.5 || x > q.box.x + q.box.w + 0.5) continue;
+        let ivs = [[q.box.y, q.box.y + q.box.h]];
+        // Uitsparingen vooraan in een zijwand of kastpaslat (greeplijst, plint) tellen niet mee.
+        for (const o of q.ops.filter(o => o.kind === 'uitsparing' && o.u + o.w >= q.uLen - 1)) {
+          const n0 = q.box.y + o.v, n1 = n0 + o.h;
+          ivs = ivs.flatMap(([a, b]) => b <= n0 || a >= n1 ? [[a, b]] : [[a, n0], [n1, b]].filter(([c, d]) => d - c > 1));
+        }
+        if (q.vInner && q.rol === 'zijwand') ivs = ivs.map(([a, b]) => [a, Math.min(b, q.box.y + q.vInner)]);
+        out.push(...ivs.map(([a, b]) => [a + r, b - r]).filter(([a, b]) => b >= a));
+      }
+      return out;
+    };
+    const nearest = (ivs, y, lo, hi) => {
+      let best = null;
+      for (const [a, b] of ivs) {
+        const c = Math.max(a, lo), d = Math.min(b, hi);
+        if (d < c) continue;
+        const yy = Math.min(Math.max(y, c), d);
+        if (best === null || Math.abs(yy - y) < Math.abs(best - y)) best = yy;
+      }
+      return best;
+    };
+    for (const q of damperReq) {
+      const f = q.f, xAbs = f.box.x + q.du, ivs = rangesAt(xAbs);
+      const lo = f.box.y + q.lo, hi = f.box.y + q.hi;
+      const ys = q.mode === 'hoeken' ? [nearest(ivs, hi, lo, hi), nearest(ivs, lo, lo, hi)] : [nearest(ivs, (lo + hi) / 2, lo, hi)];
+      const placed = [];
+      for (const y of ys) {
+        if (y === null || placed.some(pv => Math.abs(pv - y) < 40)) continue;
+        placed.push(y);
+        f.ops.push({ kind: 'boring', face: 'binnen', u: q.du, v: y - f.box.y, dia: S.demperDia, diepte: S.demperDiepte, naam: 'Demper' });
+        count('Demper');
+      }
+      if (!placed.length) warnings.push(`${f.naam}: geen plaats voor een demper waar hij tegen het korpus drukt.`);
+    }
   }
 
   // Uitsparing achteraan in een hoek over de volle hoogte (rond een koker of kolom): de kast wordt in bovenaanzicht
@@ -1561,7 +1696,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     warnings.push('Lades: de maten van bodem en rug en de boringen van de geleiders komen uit een instelbare tabel (Instellingen › Blum). Controleer ze met de montagehandleiding van Blum.');
   }
   const hardware = Object.entries(hw).map(([naam, aantal]) => ({ naam, aantal: Math.round(aantal * 100) / 100 }));
-  return { parts, warnings: [...new Set(warnings)], hardware, zones, nl };
+  const bestel = Object.entries(ord).map(([naam, aantal]) => ({ naam, aantal }));
+  return { parts, warnings: [...new Set(warnings)], hardware, bestel, zones, nl };
 }
 
 /**
@@ -1757,6 +1893,75 @@ function applyObstacles(project) {
   return changed;
 }
 
+// MARK: - Werkbladen
+/**
+ * Werkbladen van een project: op een rij onderkasten (assenstelsel van de eerste kast). Geeft per werkblad
+ * { wb, L, parts, rect } met parts in de coördinaten van de eerste kast (werkblad, spatwand, uitsparingen in 3D).
+ */
+function werkbladGeometry(project, S) {
+  const layout = projectLayout(project);
+  const out = [];
+  for (const wb of project.werkbladen ?? []) {
+    const ks = (wb.kasten ?? []).map(id => project.kasten.find(k => k.id === id)).filter(Boolean);
+    if (!ks.length) continue;
+    const L0 = layout[project.kasten.indexOf(ks[0])];
+    const r = -(Number(L0.rot) || 0) * Math.PI / 180;
+    // Elke kast in het assenstelsel van de eerste.
+    const loc = ks.map(k => {
+      const L = layout[project.kasten.indexOf(k)], dx = L.x - L0.x, dz = L.z - L0.z;
+      return { k, L, x: dx * Math.cos(r) - dz * Math.sin(r), z: dx * Math.sin(r) + dz * Math.cos(r) };
+    });
+    const x0 = Math.min(...loc.map(c => c.x)), x1 = Math.max(...loc.map(c => c.x + Number(c.k.breedte)));
+    const D = Math.max(...loc.map(c => c.z + Number(c.k.diepte)));
+    const fd = S.front;
+    const dik = Number(wb.dikte) || (wb.materiaal === 'composiet' ? 20 : 38);
+    const yTop = Math.max(...loc.map(c => c.L.y - L0.y + Number(c.k.hoogte)));    // bovenkant kasten (t.o.v. de eerste)
+    const ax0 = x0 - (Number(wb.links) || 0), ax1 = x1 + (Number(wb.rechts) || 0);
+    const az0 = Number(wb.achter) || 0, az1 = D + fd + (wb.voor == null ? 20 : Number(wb.voor));
+    const depth = az1 - az0;
+    // Uiteinden: recht of in verstek (45°, binnenhoek: vooraan korter).
+    const vL = wb.eindeLinks === 'verstek', vR = wb.eindeRechts === 'verstek';
+    const pts = [[vL ? depth : 0, depth], [ax1 - ax0 - (vR ? depth : 0), depth], [ax1 - ax0, 0], [0, 0]];
+    const parts = [];
+    const decor = wb.decor || ((wb.materiaal ?? 'plaat') === 'plaat' ? S.decorKorpus : '');
+    const naam = wb.naam || 'Werkblad';
+    const top = { id: `${wb.id}-blad`, naam, rol: 'werkblad', mat: 'korpus', dikte: dik, grain: 'u', ops: [], edges: {}, decor,
+      plaattype: wb.materiaal === 'plaat' ? 'Melamine' : (wb.materiaal === 'hout' ? 'Massief hout' : 'Composiet'),
+      kleur: (S.decors ?? []).find(d => d.code === decor)?.kleur ?? (wb.materiaal === 'composiet' ? '#8d8a85' : wb.materiaal === 'hout' ? '#a87b4f' : undefined),
+      box: { x: ax0, y: yTop, z: az0, w: ax1 - ax0, h: dik, d: depth }, uLen: ax1 - ax0, vLen: depth,
+      shape3d: vL || vR ? { plane: 'xz', pts } : undefined, materiaal: wb.materiaal || 'plaat' };
+    parts.push(top);
+    // Uitsparingen: automatisch boven een spoelbak- of kookplaatkast (gecentreerd), plus zelf toegevoegde.
+    const cut = [];
+    for (const c of loc) {
+      const type = c.k.type === 'spoelbak' ? 'spoelbak' : c.k.type === 'kookplaat' ? 'kookplaat' : null;
+      if (!type) continue;
+      const own = (wb.uitsparingen ?? []).find(u => u.kast === c.k.id);
+      if (own?.weg) continue;
+      const b = Number(own?.breedte) || (type === 'spoelbak' ? S.spoelbakUitsparingB : S.kookplaatUitsparingB);
+      const d = Number(own?.diepte) || (type === 'spoelbak' ? S.spoelbakUitsparingD : S.kookplaatUitsparingD);
+      const cx = own?.x != null && own.x !== '' ? Number(own.x) : c.x + Number(c.k.breedte) / 2 - ax0;
+      const voor = own?.voor != null && own.voor !== '' ? Number(own.voor) : (depth - d) / 2;
+      cut.push({ naam: type === 'spoelbak' ? `Spoelbak (${c.k.code})` : `Kookplaat (${c.k.code})`, b, d, cx, voor, kast: c.k.id, auto: true });
+    }
+    for (const u of (wb.uitsparingen ?? []).filter(u => !u.kast)) cut.push({ naam: u.naam || 'Uitsparing', b: Number(u.breedte) || 0, d: Number(u.diepte) || 0, cx: Number(u.x) || 0, voor: Number(u.voor) || 0, id: u.id });
+    for (const c of cut) {
+      if (!(c.b > 0 && c.d > 0)) continue;
+      parts.push({ id: `${wb.id}-uit-${c.kast ?? c.id}`, naam: c.naam, rol: 'werkblad-uitsparing', mat: 'muur', kleur: '#3a3a3a', ops: [], edges: {}, dikte: 1,
+        box: { x: ax0 + c.cx - c.b / 2, y: yTop + dik, z: az1 - c.voor - c.d, w: c.b, h: 0.8, d: c.d }, uLen: c.b, vLen: c.d });
+    }
+    // Spatwand tegen de muur, op het werkblad.
+    const sh = Number(wb.spatHoogte) || 0;
+    if (sh > 0) {
+      const sd = Number(wb.spatDikte) || 12;
+      parts.push({ id: `${wb.id}-spat`, naam: `Spatwand (${naam})`, rol: 'spatwand', mat: 'korpus', dikte: sd, grain: 'u', ops: [], edges: {}, decor, kleur: top.kleur, plaattype: top.plaattype,
+        box: { x: ax0, y: yTop + dik, z: az0, w: ax1 - ax0, h: sh, d: sd }, uLen: ax1 - ax0, vLen: sh, materiaal: wb.materiaal || 'plaat' });
+    }
+    out.push({ wb, L: L0, parts, cut, rect: { lengte: ax1 - ax0, diepte: depth, dikte: dik, x0: ax0, z0: az0, yTop }, ks });
+  }
+  return out;
+}
+
 // MARK: - Projectstandaarden
 /** Velden die een projectstandaard kunnen volgen (tenzij ze bij de kast zelf gekozen zijn: k.eigen). */
 const STD_KEYS = ['hoogte', 'diepte', 'plintHoogte', 'decorKorpus', 'decorFront', 'frontMateriaal', 'bandKorpusDecor',
@@ -1801,6 +2006,7 @@ function applyStandard(project, only = null) {
 /** Standaard plaattype: fronten (en plint) zoals gekozen bij de kast, de rest melamine. */
 function partBaseType(k, S, p) {
   if (p.mat === 'trespa') return 'Trespa';
+  if (p.rol === 'plintbak') return 'Multiplex';
   return p.mat === 'front' || p.rol === 'plint' ? (k.frontMateriaal || S.frontMateriaal || 'Melamine') : 'Melamine';
 }
 
@@ -1808,6 +2014,7 @@ function partBaseType(k, S, p) {
 function partBaseDecor(k, S, p) {
   const dKorpus = k.decorKorpus || S.decorKorpus;
   if (p.mat === 'trespa') return 'Trespa';
+  if (p.rol === 'plintbak') return 'Multiplex';
   if (p.mat === 'front' || p.rol === 'plint') return k.decorFront || S.decorFront;
   if (p.mat === 'rug') return k.decorRug || dKorpus;
   return dKorpus;

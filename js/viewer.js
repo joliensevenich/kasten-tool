@@ -7,6 +7,7 @@ const COLORS = {
   rug: 0xb99a6f,
   lade: 0xdcccaa,
   trespa: 0x3a3a3a,
+  plintbak: 0xc9a77a,
   selected: 0x3d8bd9,
 };
 

@@ -141,6 +141,8 @@ function mergeSettings(saved) {
     for (const ty of out.blum[serie].types ?? []) if (!ty.frontGaten) { const d = base.blum[serie].types?.find(x => x.code === ty.code); if (d?.frontGaten) ty.frontGaten = d.frontGaten; }
     if (!Array.isArray(out.blum[serie].types) || !out.blum[serie].types.length) out.blum[serie].types = base.blum[serie].types;
   }
+  // LEGRABOX-rug: binnenbreedte − 38 mm volgens de Blum-catalogus (vroeger − 35).
+  if (out.blum?.LEGRABOX && out.blum.LEGRABOX.rugB === 35) out.blum.LEGRABOX.rugB = 38;
   return out;
 }
 
