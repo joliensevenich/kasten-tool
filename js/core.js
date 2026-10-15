@@ -127,6 +127,8 @@ function mergeSettings(saved) {
   }
   // Blinde hoek: plaatje 22 mm van de kant (opgegeven 14-10-2026; voorlopige waarde was 20).
   if ((saved.blindPlaatRand ?? 20) === 20) out.blindPlaatRand = 22;
+  // Opvullijst binnenladen is 25 mm dik (opgegeven 15-10-2026; voorlopige waarde was 20).
+  if ((saved.binnenladeOpvul ?? 20) === 20) out.binnenladeOpvul = 25;
   // Boor 160 (Ø10) voor de push-open drevels toevoegen als hij nog niet in de lijst staat.
   if (Array.isArray(out.tools) && !out.tools.some(t => String(t.nr) === '160')) out.tools.push({ nr: '160', naam: 'Boor Ø10 (push-open drevel), alle richtingen', soort: 'boorH', dia: 10, lengte: 90 });
   // Spoelbakkast: wegneembare rug 5 cm van de achterkant (vroeger 13 mm).

@@ -36,7 +36,7 @@ function nestingItems(project, S, labelOf, kerf = 0) {
     if (res.error) { offset += W; continue; }
     const mode = k.houtDoorlopend ?? 'nee';
     if (mode !== 'vorige' || !current) current = null;
-    for (const p of sawParts(parts, S)) {
+    for (const p of sawParts(parts, S).filter(q => !q.nietZagen)) {
       const c = cutInfo(p);
       const key = labelOf(p);
       const wood = isWoodDecor(p.decor, S.decors);

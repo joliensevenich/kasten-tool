@@ -427,7 +427,7 @@ function drawCabinetOverview(doc, k, res, meta) {
   })]);
   if (res.hardware.length) sections.push(['Beslag', res.hardware.map(hw => `${hw.aantal}× ${hw.naam}`)]);
   if (res.bestel?.length) sections.push(['Te bestellen', res.bestel.map(b => `${b.aantal}× ${b.naam}`)]);
-  const plain = all.filter(p => !p.ops.length && p.rol !== 'zijwand');
+  const plain = all.filter(p => !p.ops.length && p.rol !== 'zijwand' && !p.nietZagen);
   if (plain.length) sections.push(['Onderdelen zonder bewerking', plain.map(p => { const c = cutInfo(p); return `${p.naam}: ${fmt(c.L)} × ${fmt(c.B)} × ${fmt(p.dikte)}`; })]);
   if (res.warnings.length) sections.push(['Let op', res.warnings]);
   infoColumn(doc, sections, w - m - 75, m + 20, 72, h - m - 16);

@@ -124,7 +124,12 @@ const DEFAULT_SETTINGS = {
   spoelbakUitsparingD: 440,
   kookplaatUitsparingB: 560, // werkblad: uitsparing boven een kookplaatkast
   kookplaatUitsparingD: 490,
-  binnenladeOpvul: 20,       // binnenladen: dikte van de verdikkingsblokken (langs de scharnieren)
+  binnenladeOpvulType: 'kunststof', // 'kunststof' (bestellen) of 'hout' (zelf zagen)
+  opvulArtikel: 'KPR.6056.ZW', // Blum opvullijst voor binnenlade (kunststof, zwart)
+  opvulLengte: 486,
+  opvulHoogte: 50,
+  opvulSchroeven: 3,         // schroeven 3,5 × 40 per opvullijst
+  binnenladeOpvul: 25,       // binnenladen: dikte van de opvullijst (Blum KPR.6056.ZW: 25 mm)
   binnenladeTerug: 25,       // binnenfront zoveel achter de voorkant van de kast (ruimte voor deur en scharnieren)
   binnenfrontExtra: 30,      // binnenfront = hoogte laderug + dit
   binnenladeTussen: 40,      // ruimte tussen de binnenladen
@@ -1070,35 +1075,59 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const op = S.binnenladeOpvul, terug = S.binnenladeTerug;
       const zFront = D - frontInset - terug;                  // voorkant van het binnenfront
       const nlB = NL_LIST.filter(n => n <= zFront - rugFront - 10).pop();
-      const lw = W - 2 * t - 2 * op;                          // binnenbreedte tussen de blokken
+      // Opvulblok alleen aan de scharnierkant (bij twee deuren aan beide kanten).
+      const fx0 = k.front === 'inliggend' ? t + v / 2 : v / 2, fx1 = k.front === 'inliggend' ? W - t - v / 2 : W - v / 2;
+      const nDeur = k.deuren === 'auto' ? ((fx1 - fx0 - (Number(k.blindBreedte) || 0)) > S.deurMaxBreedte ? 2 : 1) : Number(k.deuren);
+      const hingeL = (Number(k.blindBreedte) || 0) > 0 ? k.blindKant !== 'rechts' : k.scharnierKant !== 'rechts';
+      const blokL = nDeur === 2 || hingeL, blokR = nDeur === 2 || !hingeL;
+      const xL = t + (blokL ? op : 0), xR = W - t - (blokR ? op : 0);
+      const lw = xR - xL;                                     // binnenbreedte tussen de blokken / zijwand
       const fh = rugH + S.binnenfrontExtra, pitch = fh + S.binnenladeTussen;
       if (!nlB) warnings.push('Binnenladen: de kast is niet diep genoeg voor een ladegeleider.');
       else for (let i = 0; i < nB; i++) {
         const y0 = z.open0 + S.binnenladeTussen / 2 + i * pitch;
         if (y0 + fh > z.open1 - 10) { warnings.push(`Binnenlade ${i + 1} past niet meer in het vak.`); break; }
         const yRun = y0 + b.gatHoogte;
-        // Verdikkingsblokken links en rechts (geleider erop geschroefd, blok door de zijwand vast).
-        for (const left of [true, false]) {
-          const blk = add({ naam: `Verdikkingsblok binnenlade ${i + 1} ${left ? 'links' : 'rechts'}`, rol: 'opvul', mat: 'korpus', dikte: op, grain: 'u', edges: {},
-            box: { x: left ? t : W - t - op, y: yRun - 20, z: zFront - nlB, w: op, h: 60, d: nlB }, uLen: nlB, vLen: 60 });
-          for (const g of b.gaten) if (g <= nlB - S.geleiderAchterVrij) blk.ops.push({ kind: 'boring', face: 'binnen', u: nlB - g, v: 20, dia: S.geleiderDia, diepte: Math.min(S.geleiderDiepte, op - 3), naam: `Ladegeleider ${serieB}` });
-          for (const u of [40, nlB - 40]) blk.ops.push({ kind: 'boring', face: 'binnen', u, v: 45, dia: S.schroefDia, diepte: op, doorgaand: true, naam: 'Schroef blok' });
+        // Opvulblokken links en rechts (de geleider komt erop). Kunststof: besteld, niet gezaagd; hout: zelf gemaakt.
+        // Blum-opvullijst (KPR.6056.ZW): 486 mm lang, 50 mm hoog; vooraan gelijk, achteraan inkorten tot de lengte van de geleider.
+        const lijstL = Math.min(nlB, S.binnenladeOpvulType === 'hout' ? nlB : S.opvulLengte);
+        // In de zijwand komen de punten op de plaats van de schroeven van de geleider, zodat je ziet waar de blokken komen.
+        const kunststof = S.binnenladeOpvulType !== 'hout';
+        for (const left of [true, false].filter(l => (l ? blokL : blokR))) {
+          const blk = add({ naam: `${kunststof ? 'Kunststof opvulblok' : 'Verdikkingsblok'} binnenlade ${i + 1} ${left ? 'links' : 'rechts'}`, rol: 'opvul', mat: 'korpus', dikte: op, grain: 'u', edges: {},
+            nietZagen: kunststof, kleur: kunststof ? '#4a4a4a' : undefined,
+            box: { x: left ? t : W - t - op, y: yRun - 20, z: zFront - lijstL, w: op, h: S.opvulHoogte, d: lijstL }, uLen: lijstL, vLen: S.opvulHoogte });
+          const sd = left ? sideL : sideR;
+          for (const g of b.gaten) if (g <= nlB - S.geleiderAchterVrij) {
+            sd.ops.push({ kind: 'boring', face: 'binnen', u: sideU(zFront - g), v: sideV(yRun), dia: S.geleiderDia, diepte: S.geleiderDiepte, naam: `Opvulblok binnenlade ${serieB}` });
+            if (!kunststof) blk.ops.push({ kind: 'boring', face: 'binnen', u: lijstL - g, v: 20, dia: S.geleiderDia, diepte: Math.min(S.geleiderDiepte, op - 3), naam: `Ladegeleider ${serieB}` });
+          }
+          if (!kunststof) for (const u of [40, lijstL - 40]) blk.ops.push({ kind: 'boring', face: 'binnen', u, v: 45, dia: S.schroefDia, diepte: op, doorgaand: true, naam: 'Schroef blok' });
         }
-        count('Verdikkingsblok', 2);
+        const nBlok = (blokL ? 1 : 0) + (blokR ? 1 : 0);
+        // Aan een kant zonder blok komen de punten voor de geleider rechtstreeks in de zijwand.
+        for (const left of [true, false].filter(l => !(l ? blokL : blokR))) {
+          const sd = left ? sideL : sideR;
+          for (const g of b.gaten) if (g <= nlB - S.geleiderAchterVrij) sd.ops.push({ kind: 'boring', face: 'binnen', u: sideU(zFront - g), v: sideV(yRun), dia: S.geleiderDia, diepte: S.geleiderDiepte, naam: `Ladegeleider ${serieB}` });
+        }
+        if (kunststof) {
+          order(`Blum opvullijst ${S.opvulArtikel} zwart, ${S.opvulLengte} mm${nlB < S.opvulLengte ? ` (achteraan inkorten tot ${nlB} mm)` : ''} – binnenlade ${serieB} NL ${nlB}`, nBlok);
+          order('Spaanplaatschroef 3,5 × 40 zwart (opvullijst)', nBlok * S.opvulSchroeven);
+        } else count('Verdikkingsblok (hout)', nBlok);
         // Lade: zelf maken of op maat bestellen.
         const bodemD = nlB - b.bodemD;
-        if (s.binnenUitvoering === 'opmaat') order(`Binnenlade op maat ${ltName} NL ${nlB} (${k.code}): breedte tussen de blokken ${r1(lw)} mm, bodem ${r1(lw - b.bodemB)} × ${r1(bodemD)}, rug ${r1(lw - b.rugB)} × ${r1(rugH)}`);
+        if (s.binnenUitvoering === 'opmaat') order(`Binnenlade op maat ${ltName} NL ${nlB} (${k.code}): binnenbreedte (met opvulblok) ${r1(lw)} mm, bodem ${r1(lw - b.bodemB)} × ${r1(bodemD)}, rug ${r1(lw - b.rugB)} × ${r1(rugH)}`);
         else {
           add({ naam: `Binnenlade bodem (${ltName})`, rol: 'lade', mat: 'lade', dikte: S.ladeBodemDikte, grain: 'u', edges: {},
-            box: { x: t + op + b.bodemB / 2, y: yRun, z: zFront - bodemD - 5, w: lw - b.bodemB, h: S.ladeBodemDikte, d: bodemD }, uLen: lw - b.bodemB, vLen: bodemD });
+            box: { x: xL + b.bodemB / 2, y: yRun, z: zFront - bodemD - 5, w: lw - b.bodemB, h: S.ladeBodemDikte, d: bodemD }, uLen: lw - b.bodemB, vLen: bodemD });
           add({ naam: `Binnenlade rug (${ltName})`, rol: 'lade', mat: 'lade', dikte: S.ladeBodemDikte, grain: 'u', edges: {},
-            box: { x: t + op + b.rugB / 2, y: yRun + S.ladeBodemDikte, z: zFront - bodemD - 5, w: lw - b.rugB, h: rugH, d: S.ladeBodemDikte }, uLen: lw - b.rugB, vLen: rugH });
+            box: { x: xL + b.rugB / 2, y: yRun + S.ladeBodemDikte, z: zFront - bodemD - 5, w: lw - b.rugB, h: rugH, d: S.ladeBodemDikte }, uLen: lw - b.rugB, vLen: rugH });
         }
         // Binnenfront (in het decor van het korpus), met de frontbevestiging.
         const bf = add({ naam: `Binnenfront ${i + 1}`, rol: 'binnenfront', mat: 'korpus', dikte: t, grain: 'u', edges: { u0: S.bandKorpus, u1: S.bandKorpus, v0: S.bandKorpus, v1: S.bandKorpus }, bandPlaat: true,
-          box: { x: t + op + 1, y: y0, z: zFront - t, w: lw - 2, h: fh, d: t }, uLen: lw - 2, vLen: fh });
+          box: { x: xL + 1, y: y0, z: zFront - t, w: lw - 2, h: fh, d: t }, uLen: lw - 2, vLen: fh });
         const fg = lt?.frontGaten ?? DEFAULT_SETTINGS.blum[serieB]?.types?.find(x => x.code === lt?.code)?.frontGaten;
-        if (S.frontBevestiging && fg?.length) for (const xc of [t + op + S.frontBevZij, W - t - op - S.frontBevZij]) for (const h of fg) {
+        if (S.frontBevestiging && fg?.length) for (const xc of [xL + S.frontBevZij, xR - S.frontBevZij]) for (const h of fg) {
           const fv = yRun + h - bf.box.y;
           if (fv > 5 && fv < bf.vLen - 5) bf.ops.push({ kind: 'boring', face: 'binnen', u: xc - bf.box.x, v: fv, dia: S.frontBevDia, diepte: S.frontBevDiepte, naam: 'Frontbevestiging' });
         }
