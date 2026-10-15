@@ -80,6 +80,7 @@ const Projects = {
   get project() { return Store.projects.find(p => p.id === this.open); },
 
   renderProject() {
+    if (this.project && applyObstacles(this.project)) touch(this.project);
     const v = $('#view-projects');
     const p = this.project;
     this.disposeViewer();
@@ -97,14 +98,28 @@ const Projects = {
               <button type="button" id="pj-fronts">${icon('eye')}<span>Fronten</span></button>
               <button type="button" id="pj-explode">${icon('explode')}<span>Uit elkaar</span></button>
               <button type="button" id="pj-fit">${icon('cube')}<span>Passend</span></button>
+              ${p.kasten.length ? `<button type="button" id="pj-move" class="${this.moveMode ? 'on' : ''}">${icon('ruler')}<span>Verplaatsen</span></button>` : ''}
             </div>
           </div>
           <div class="split-side">
+            <div class="group ${this.moveMode ? '' : 'hidden'}" id="pj-movepanel"></div>
+            <div class="group"><div class="group-body">
+              <button class="row link" type="button" id="pj-std"><span class="icon-label">${icon('gear')}Projectstandaarden</span><span class="row-sub" style="margin-left:auto">${Object.values(p.standaard ?? {}).filter(x => x !== null && x !== '').length || 'geen'}</span><span class="chev">${icon('right')}</span></button>
+              <button class="row link" type="button" id="pj-wand"><span class="icon-label">${icon('plus')}Wand in één keer maken</span><span class="chev">${icon('right')}</span></button>
+            </div><div class="group-footer">Projectstandaarden gelden voor alle kasten van dit project, behalve wat je bij een kast zelf anders koos.</div></div>
             <div class="group"><div class="group-header head-with-btn"><span>Kasten</span>
+              ${p.kasten.length > 1 ? `<button type="button" class="head-btn" id="pj-select">${this.selectMode ? 'Stop' : 'Selecteer'}</button>` : ''}
               <button type="button" class="head-btn" id="pj-add">${icon('plus')}Kast toevoegen</button></div><div class="group-body" id="pj-list"></div></div>
             <div class="group"><div class="group-header">Opstelling</div><div class="group-body">
               ${row('Bovenkasten: onderkant boven vloer', numHTML('pj-boven', p.bovenHoogte ?? '', '1400'))}
-            </div><div class="group-footer">Automatisch staan onder- en kolomkasten naast elkaar op de vloer, en bovenkasten in een eigen rij op deze hoogte. Per kast kun je "Plaatsing" op Vrij zetten, voor een hoek, een eiland of bovenkasten boven een bepaalde onderkast.</div></div>
+              <div class="row"><span class="row-label">Plint en greeplijst doorlopend</span>${toggleHTML('pj-koppel', p.koppelen !== false)}</div>
+            </div><div class="group-footer">Automatisch staan onder- en kolomkasten naast elkaar op de vloer, en bovenkasten in een eigen rij op deze hoogte. Met "Verplaatsen" in 3D zet je een kast waar je wilt. Staan kasten tegen elkaar (voorkant op één lijn), dan worden plint en greeplijsten één doorlopend stuk; een te lang stuk wordt op een kastnaad verdeeld.</div></div>
+            <div class="group"><div class="group-header">Ruimte en obstakels (optioneel)</div><div class="group-body" id="pj-ruimte"></div>
+              <div class="group-footer">Je hoeft geen ruimte te tekenen. Doe je het wel: wand na wand de lengte en de hoek (90° = haakse hoek), te beginnen met de achterwand van links naar rechts. Een obstakel (koker, kolom) zet je met X (vanaf links), Z (vanaf de achterwand) en zijn maten; een kast die er achteraan tegen staat, krijgt automatisch een uitsparing.</div></div>
+            <div class="group"><div class="group-header head-with-btn"><span>Afwerkpanelen</span>
+              ${p.kasten.length ? `<button type="button" class="head-btn" id="pj-paneel">${icon('plus')}Paneel toevoegen</button>` : ''}</div>
+              <div class="group-body" id="pj-panelen"></div>
+              <div class="group-footer">Een paneel tegen een zijkant, onder de hangkasten, ... zonder naad in het zicht. Tik op "Paneel toevoegen", dan in 3D op het vlak en het eerste punt, en daarna op het tweede punt. De punten klikken vast op de hoeken van de kasten.</div></div>
             <div class="group"><div class="group-body">
               <button class="row button" type="button" id="pj-cut"><span class="icon-label">${icon('table')}Zaaglijst en beslag</span></button>
               <button class="row button" type="button" id="pj-plan"><span class="icon-label">${icon('explode')}Zaagplan (platen)</span></button>
@@ -113,22 +128,24 @@ const Projects = {
               <button class="row button" type="button" id="pj-tek"><span class="icon-label">${icon('ruler')}Technische tekening (PDF)</span></button>
               <button class="row button" type="button" id="pj-import"><span class="icon-label">${icon('copy')}Kasten uit ander project toevoegen</span></button>
               <button class="row button" type="button" id="pj-share"><span class="icon-label">${icon('share')}Projectbestand delen</span></button>
-            </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand, per kast een map.</div></div>
+            </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand: één map met de naam van het project, elk bestand begint met het kastnummer (bv. K01_stijl_links).</div></div>
           </div>
         </div>
       </div>`;
     $('#pj-back', v).addEventListener('click', () => { this.open = null; this.render(); });
+    renderRoom.call(this, p, v);
     $('#pj-menu', v).addEventListener('click', () => this.menu());
     $('#pj-add', v).addEventListener('click', () => pickPreset(id => {
-      const k = newCabinet(id);
-      k.id = uid();
-      k.code = `K${p.kasten.length + 1}`;
+      const k = createCabinet(p, id);
       p.kasten.push(k);
       touch(p);
       this.renderProject();
       openCabinet(p, k);
     }));
     $('#pj-cut', v).addEventListener('click', () => openCutList(p));
+    $('#pj-std', v).addEventListener('click', () => openStandards(p, () => { this.keepCamera = true; this.renderProject(); }));
+    $('#pj-wand', v).addEventListener('click', () => openWallBuilder(p, () => { this.renderProject(); }));
+    $('#pj-select', v)?.addEventListener('click', () => { this.selectMode = !this.selectMode; this.selected = new Set(); this.keepCamera = true; this.renderProject(); });
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));
     $('#pj-tek', v).addEventListener('click', () => { const d = technicalDrawingPdf(p, S()); shareFile(d.blob, d.name); });
     $('#pj-csv', v).addEventListener('click', () => {
@@ -139,6 +156,7 @@ const Projects = {
     $('#pj-plan', v).addEventListener('click', () => openCutPlan(p));
     $('#pj-share', v).addEventListener('click', () => shareProject(p));
     $('#pj-import', v).addEventListener('click', () => importCabinets(p, () => this.renderProject()));
+    $('#pj-koppel', v).addEventListener('change', e => { p.koppelen = e.target.checked; touch(p); this.keepCamera = true; this.renderProject(); });
     $('#pj-boven', v).addEventListener('change', e => { p.bovenHoogte = e.target.value === '' ? null : Number(e.target.value); touch(p); this.renderProject(); });
 
     const list = $('#pj-list', v);
@@ -155,32 +173,236 @@ const Projects = {
         <button class="mini" type="button" data-act="up" aria-label="Naar links" ${i === 0 ? 'disabled' : ''}>${icon('up')}</button>
         <button class="mini" type="button" data-act="more" aria-label="Meer">•••</button>
       </div>`);
+      if (this.selectMode) {
+        const cb = el(`<label class="switch" style="margin-right:8px"><input type="checkbox" ${this.selected?.has(k.id) ? 'checked' : ''}><span></span></label>`);
+        row.prepend(cb);
+        $('input', cb).addEventListener('change', e => { if (e.target.checked) this.selected.add(k.id); else this.selected.delete(k.id); $('#pj-bulk', v).textContent = `Pas ${this.selected.size} ${this.selected.size === 1 ? 'kast' : 'kasten'} aan`; });
+      }
       $('.kast-main', row).addEventListener('click', () => openCabinet(p, k));
       $('[data-act=up]', row).addEventListener('click', () => { [p.kasten[i - 1], p.kasten[i]] = [p.kasten[i], p.kasten[i - 1]]; touch(p); this.renderProject(); });
       $('[data-act=more]', row).addEventListener('click', async () => {
-        const c = await actionSheet(k.code, '', [{ label: 'Dupliceren', value: 'dup' }, { label: 'Verwijderen', role: 'destructive', value: 'del' }]);
+        const c = await actionSheet(k.code, '', [{ label: 'Dupliceren', value: 'dup' }, { label: 'Bewaren als eigen kasttype', value: 'own' }, { label: 'Verwijderen', role: 'destructive', value: 'del' }]);
+        if (c === 'own') { saveOwnType(k); return; }
         if (c === 'dup') { const copy = JSON.parse(JSON.stringify(k)); copy.id = uid(); copy.code = `K${p.kasten.length + 1}`; p.kasten.splice(i + 1, 0, copy); }
         if (c === 'del') p.kasten.splice(i, 1);
         if (c) { touch(p); this.renderProject(); }
       });
       list.appendChild(row);
     });
+    if (this.selectMode && p.kasten.length) {
+      const bar = el(`<div class="row"><button class="mini" type="button" id="pj-all" style="width:auto;padding:0 10px">Alles</button>
+        <button class="row button" type="button" id="pj-bulk" style="flex:1">Pas ${this.selected.size} ${this.selected.size === 1 ? 'kast' : 'kasten'} aan</button></div>`);
+      list.appendChild(bar);
+      $('#pj-all', bar).addEventListener('click', () => { this.selected = new Set(p.kasten.map(x => x.id)); this.keepCamera = true; this.renderProject(); });
+      $('#pj-bulk', bar).addEventListener('click', () => {
+        const ks = p.kasten.filter(x => this.selected.has(x.id));
+        if (!ks.length) { alertBox('Niets geselecteerd', 'Vink eerst de kasten aan die je wilt aanpassen.'); return; }
+        openBulkEdit(p, ks, () => { this.keepCamera = true; this.renderProject(); });
+      });
+    }
 
     if (p.kasten.length) {
-      this.viewer = makeViewer($('#pj-viewer', v), { onPick: hit => { if (hit) { const k = p.kasten.find(x => x.id === hit.cab); if (k) openCabinet(p, k, hit.part.id); } } });
+      this.viewer = makeViewer($('#pj-viewer', v), { onPick: hit => {
+        if (this.panelPick) { pickPanelPoint(hit); return; }
+        if (this.moveMode) { this.moveKey = hit?.cab && p.kasten.some(x => x.id === hit.cab) ? hit.cab : null; this.viewer.highlightCab(this.moveKey); renderMove(); return; }
+        if (hit?.cab === 'afwerk') { const pn = p.panelen?.find(x => x.id === hit.part.id); if (pn) openPanel(p, pn, () => { this.keepCamera = true; this.renderProject(); }); return; }
+        if (hit) { const k = p.kasten.find(x => x.id === hit.cab); if (k) openCabinet(p, k, hit.part.id); }
+      } });
       if (!this.viewer) return;
-      const layout = projectLayout(p);
       const cabs = [];
-      p.kasten.forEach((k, i) => {
-        const res = buildCabinet(k, S());
-        if (res.error) return;
-        const L = layout[i];
-        cabs.push({ key: k.id, parts: res.parts, offsetX: L.x, offsetY: L.y, offsetZ: L.z, rot: L.rot });
-      });
+      // Plinten en greeplijsten van kasten tegen elkaar als één stuk tonen.
+      for (const { k, res, parts, L } of projectParts(p, S())) {
+        if (res.error) continue;
+        cabs.push({ key: k.id, parts, offsetX: L.x, offsetY: L.y, offsetZ: L.z, rot: L.rot });
+      }
+      const room = roomGeometry(p);
+      if (room.parts.length) cabs.push({ key: 'ruimte', parts: room.parts, offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
+      if (p.panelen?.length) cabs.push({ key: 'afwerk', parts: p.panelen.map(pn => panelPartFull(pn, S())), offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
       this.viewer.showFloor = true;
       this.viewer.floorY = 0;
-      this.viewer.show(cabs, { refit: true });
+      this.viewer.show(cabs, { refit: !this.keepCamera });
+      this.keepCamera = false;
       bindViewerTools(v, this.viewer, 'pj');
+
+      // MARK: Verplaatsen in de opstelling
+      const viewer = this.viewer;
+      const local = new Map();       // kast-id → { x0, x1, z0, z1 } in eigen coördinaten
+      p.kasten.forEach(k => {
+        const res = buildCabinet(k, S());
+        if (res.error) return;
+        const ps = res.parts.filter(q => !q.tilt);
+        local.set(k.id, { x0: Math.min(...ps.map(q => q.box.x)), x1: Math.max(...ps.map(q => q.box.x + q.box.w)),
+          z0: Math.min(...ps.map(q => q.box.z)), z1: Math.max(...ps.map(q => q.box.z + q.box.d)) });
+      });
+      const rotPt = (x, z, rot) => { const a = -rot * Math.PI / 180; return [x * Math.cos(a) + z * Math.sin(a), -x * Math.sin(a) + z * Math.cos(a)]; };
+      const posOf = k => { const L = projectLayout(p)[p.kasten.indexOf(k)]; return { x: L.x, y: L.y, z: L.z, rot: L.rot }; };
+      const worldBox = (k, pos) => {
+        const b = local.get(k.id);
+        if (!b) return null;
+        const pts = [[b.x0, b.z0], [b.x1, b.z0], [b.x0, b.z1], [b.x1, b.z1]].map(([x, z]) => rotPt(x, z, pos.rot));
+        return { x0: pos.x + Math.min(...pts.map(q => q[0])), x1: pos.x + Math.max(...pts.map(q => q[0])), z0: pos.z + Math.min(...pts.map(q => q[1])), z1: pos.z + Math.max(...pts.map(q => q[1])) };
+      };
+      const setPos = (k, pos) => {
+        Object.assign(k, { plaatsing: 'vrij', posX: Math.round(pos.x * 10) / 10, posY: Math.round(pos.y * 10) / 10, posZ: Math.round(pos.z * 10) / 10, rot: ((Math.round(pos.rot) % 360) + 360) % 360 });
+        viewer.setCabinetTransform(k.id, k.posX, k.posY, k.posZ, k.rot);
+      };
+      const step = () => this.moveStep ?? 10;
+      viewer.onDrag = (key, x, z) => {
+        const k = p.kasten.find(c => c.id === key);
+        const pos = { ...posOf(k), x, z };
+        const me = worldBox(k, pos);
+        // Vastklikken tegen de zijkanten van andere kasten (binnen 30 mm), anders op 10 mm.
+        let dx = null, dz = null;
+        for (const o of p.kasten) {
+          if (o === k) continue;
+          const ob = worldBox(o, posOf(o));
+          if (!ob) continue;
+          for (const [a, b] of [[me.x0, ob.x1], [me.x1, ob.x0], [me.x0, ob.x0], [me.x1, ob.x1]]) if (Math.abs(b - a) < 30 && (dx === null || Math.abs(b - a) < Math.abs(dx))) dx = b - a;
+          for (const [a, b] of [[me.z0, ob.z1], [me.z1, ob.z0], [me.z0, ob.z0], [me.z1, ob.z1]]) if (Math.abs(b - a) < 30 && (dz === null || Math.abs(b - a) < Math.abs(dz))) dz = b - a;
+        }
+        // Ook tegen obstakels en rechte wanden.
+        const room = roomGeometry(p);
+        for (const o of room.parts.filter(q => q.rol === 'obstakel')) {
+          const ob = { x0: o.box.x, x1: o.box.x + o.box.w, z0: o.box.z, z1: o.box.z + o.box.d };
+          for (const [a, b] of [[me.x0, ob.x1], [me.x1, ob.x0]]) if (Math.abs(b - a) < 30 && (dx === null || Math.abs(b - a) < Math.abs(dx))) dx = b - a;
+          for (const [a, b] of [[me.z0, ob.z1], [me.z0, ob.z0]]) if (Math.abs(b - a) < 30 && (dz === null || Math.abs(b - a) < Math.abs(dz))) dz = b - a;
+        }
+        for (const ln of room.lines) {
+          if (Math.abs(ln.z0 - ln.z1) < 0.5) { const b = ln.z0; for (const a of [me.z0, me.z1]) if (Math.abs(b - a) < 40 && (dz === null || Math.abs(b - a) < Math.abs(dz))) dz = b - a; }
+          if (Math.abs(ln.x0 - ln.x1) < 0.5) { const b = ln.x0; for (const a of [me.x0, me.x1]) if (Math.abs(b - a) < 40 && (dx === null || Math.abs(b - a) < Math.abs(dx))) dx = b - a; }
+        }
+        const nx = dx !== null ? x + dx : Math.round(x / 10) * 10, nz = dz !== null ? z + dz : Math.round(z / 10) * 10;
+        k._drag = { x: nx, z: nz };
+        const info = $('#mv-info', v);
+        if (info) info.textContent = `X ${Math.round(nx)} · Z ${Math.round(nz)}`;
+        return { x: nx, z: nz };
+      };
+      viewer.onDragEnd = key => {
+        const k = p.kasten.find(c => c.id === key);
+        if (!k?._drag) return;
+        setPos(k, { ...posOf(k), x: k._drag.x, z: k._drag.z });
+        delete k._drag;
+        touch(p);
+        if (applyObstacles(p)) { touch(p); this.keepCamera = true; this.renderProject(); return; }
+        renderMove();
+      };
+      const renderMove = () => {
+        const panel = $('#pj-movepanel', v);
+        if (!panel) return;
+        panel.classList.toggle('hidden', !this.moveMode);
+        const k = p.kasten.find(c => c.id === this.moveKey);
+        if (!k) {
+          panel.innerHTML = `<div class="group-header">Verplaatsen</div><div class="group-body"><div class="row"><span class="row-sub">Tik in 3D op een kast om ze te kiezen. Sleep ze dan over de vloer, of gebruik de knoppen. Ze klikt vast tegen andere kasten.</span></div></div>`;
+          return;
+        }
+        const pos = posOf(k);
+        const st = step();
+        panel.innerHTML = `<div class="group-header head-with-btn"><span>Verplaatsen: ${esc(k.code)}</span><button type="button" class="head-btn" id="mv-done">Klaar</button></div>
+          <div class="group-body">
+            <div class="row"><span class="row-label">Stap</span><div class="row-fill">${[1, 10, 100].map(n => `<button class="mini ${n === st ? 'on' : ''}" type="button" data-step="${n}">${n} mm</button>`).join('')}</div></div>
+            <div class="row"><span class="row-label">Links / rechts</span><div class="row-fill"><button class="mini" type="button" data-mv="x,-1">◀</button><button class="mini" type="button" data-mv="x,1">▶</button></div></div>
+            <div class="row"><span class="row-label">Naar achter / voor</span><div class="row-fill"><button class="mini" type="button" data-mv="z,-1">▲</button><button class="mini" type="button" data-mv="z,1">▼</button></div></div>
+            <div class="row"><span class="row-label">Omlaag / omhoog</span><div class="row-fill"><button class="mini" type="button" data-mv="y,-1">↓</button><button class="mini" type="button" data-mv="y,1">↑</button></div></div>
+            <div class="row"><span class="row-label">Draaien</span><div class="row-fill"><button class="mini" type="button" data-rot="-90">⟲ 90°</button><button class="mini" type="button" data-rot="90">⟳ 90°</button></div></div>
+            ${row('X (vanaf links)', numHTML('mv-x', Math.round(pos.x * 10) / 10))}
+            ${row('Y (onderkant korpus)', numHTML('mv-y', Math.round(pos.y * 10) / 10))}
+            ${row('Z (naar voor)', numHTML('mv-z', Math.round(pos.z * 10) / 10))}
+            ${row('Hoek', numHTML('mv-rot', pos.rot, '°'))}
+            <div class="row"><span class="row-sub" id="mv-info">Sleep de kast in 3D over de vloer.</span></div>
+            <button class="row button" type="button" id="mv-auto">Terug naar automatisch</button>
+          </div>`;
+        $$('[data-step]', panel).forEach(b => b.addEventListener('click', () => { this.moveStep = Number(b.dataset.step); renderMove(); }));
+        $$('[data-mv]', panel).forEach(b => b.addEventListener('click', () => {
+          const [ax, sg] = b.dataset.mv.split(','); const q = posOf(k); q[ax] += Number(sg) * step(); setPos(k, q); touch(p); renderMove();
+        }));
+        $$('[data-rot]', panel).forEach(b => b.addEventListener('click', () => {
+          // Draaien rond het midden van de kast.
+          const q = posOf(k), lb = local.get(k.id), cx = (lb.x0 + lb.x1) / 2, cz = (lb.z0 + lb.z1) / 2;
+          const [wx, wz] = rotPt(cx, cz, q.rot), nr = q.rot + Number(b.dataset.rot), [nx, nz] = rotPt(cx, cz, nr);
+          setPos(k, { ...q, x: q.x + wx - nx, z: q.z + wz - nz, rot: nr }); touch(p); renderMove();
+        }));
+        for (const [id, key] of [['mv-x', 'x'], ['mv-y', 'y'], ['mv-z', 'z'], ['mv-rot', 'rot']]) {
+          $(`#${id}`, panel).addEventListener('change', e => { if (e.target.value === '') return; const q = posOf(k); q[key] = Number(e.target.value); setPos(k, q); touch(p); });
+        }
+        $('#mv-auto', panel).addEventListener('click', () => {
+          k.plaatsing = 'auto'; touch(p); this.keepCamera = true; this.renderProject();
+        });
+        $('#mv-done', panel).addEventListener('click', () => { this.moveKey = null; viewer.highlightCab(null); renderMove(); });
+      };
+      $('#pj-move', v)?.addEventListener('click', () => {
+        this.moveMode = !this.moveMode;
+        viewer.setMoveMode(this.moveMode);
+        $('#pj-move', v).classList.toggle('on', this.moveMode);
+        if (!this.moveMode) this.moveKey = null;
+        renderMove();
+      });
+      viewer.setMoveMode(!!this.moveMode);
+      if (this.moveMode && this.moveKey) viewer.highlightCab(this.moveKey);
+      renderMove();
+
+      // MARK: Afwerkpanelen (van punt tot punt)
+      const corners = [];
+      for (const { k, res, L } of projectParts(p, S())) {
+        if (res.error) continue;
+        const ps = res.parts.filter(q => !q.tilt);
+        const b = { x0: Math.min(...ps.map(q => q.box.x)), x1: Math.max(...ps.map(q => q.box.x + q.box.w)), y0: Math.min(...ps.map(q => q.box.y)), y1: Math.max(...ps.map(q => q.box.y + q.box.h)),
+          z0: Math.min(...ps.map(q => q.box.z)), z1: Math.max(...ps.map(q => q.box.z + q.box.d)) };
+        for (const x of [b.x0, b.x1]) for (const z of [b.z0, b.z1]) for (const y of [b.y0, b.y1]) {
+          const [rx, rz] = rotPt(x, z, L.rot);
+          corners.push({ x: L.x + rx, y: L.y + y, z: L.z + rz });
+        }
+        // Ook de hoeken van het korpus zelf (zonder fronten en plint).
+        for (const x of [0, Number(k.breedte)]) for (const z of [0, Number(k.diepte)]) for (const y of [0, Number(k.hoogte)]) {
+          const [rx, rz] = rotPt(x, z, L.rot);
+          corners.push({ x: L.x + rx, y: L.y + y, z: L.z + rz });
+        }
+      }
+      for (const pn of p.panelen ?? []) { const b = panelPart(pn, S()).box; for (const x of [b.x, b.x + b.w]) for (const y of [b.y, b.y + b.h]) for (const z of [b.z, b.z + b.d]) corners.push({ x, y, z }); }
+      const pickInfo = () => $('#pj-pickinfo', v);
+      const snap = (pt, axis) => {
+        // Dichtstbijzijnde hoek binnen 60 mm (in het vlak van het paneel), anders afgerond op 1 mm.
+        const others = ['x', 'y', 'z'].filter(a => a !== axis);
+        let best = null, bd = 60;
+        for (const c of corners) { const dd = Math.hypot(...others.map(a => c[a] - pt[a])); if (dd < bd) { bd = dd; best = c; } }
+        const out = { x: Math.round(pt.x), y: Math.round(pt.y), z: Math.round(pt.z) };
+        if (best) for (const a of others) out[a] = Math.round(best[a] * 10) / 10;
+        return out;
+      };
+      const pickPanelPoint = hit => {
+        if (!hit?.point || !hit.normal) return;
+        const st = this.panelPick;
+        if (st.step === 1) {
+          const n = hit.normal, axis = Math.abs(n.x) > Math.abs(n.y) && Math.abs(n.x) > Math.abs(n.z) ? 'x' : Math.abs(n.y) > Math.abs(n.z) ? 'y' : 'z';
+          const pt = snap(hit.point, axis);
+          this.panelPick = { step: 2, axis, zin: Math.sign(n[axis]) || 1, vlak: Math.round(hit.point[axis] * 10) / 10, first: pt };
+          if (pickInfo()) pickInfo().textContent = 'Tik nu op het tweede punt (de andere hoek van het paneel).';
+          return;
+        }
+        const pt = snap(hit.point, st.axis);
+        const [o0, o1] = ['x', 'y', 'z'].filter(a => a !== st.axis);
+        const pn = { id: uid(), as: st.axis, zin: st.zin, vlak: st.vlak, a0: st.first[o0], a1: pt[o0], b0: st.first[o1], b1: pt[o1], dikte: null, mat: 'front' };
+        if (Math.abs(pn.a1 - pn.a0) < 10 || Math.abs(pn.b1 - pn.b0) < 10) { if (pickInfo()) pickInfo().textContent = 'Het paneel is te klein: tik op een tweede punt verder weg.'; return; }
+        pn.naam = st.axis === 'x' ? 'Zijpaneel' : st.axis === 'y' ? (st.zin < 0 ? 'Onderpaneel' : 'Bovenpaneel') : (st.zin > 0 ? 'Frontpaneel' : 'Achterpaneel');
+        p.panelen = [...(p.panelen ?? []), pn];
+        this.panelPick = null;
+        touch(p); this.keepCamera = true; this.renderProject();
+      };
+      const panelList = $('#pj-panelen', v);
+      if (this.panelPick) panelList.innerHTML = `<div class="row"><span class="row-sub" id="pj-pickinfo">${this.panelPick.step === 1 ? 'Tik in 3D op het vlak waar het paneel tegen komt, op het eerste punt (een hoek).' : 'Tik nu op het tweede punt.'}</span>
+        <button class="mini" type="button" id="pj-pickstop" style="width:auto;padding:0 10px">Stop</button></div>`;
+      else panelList.innerHTML = (p.panelen ?? []).length ? '' : '<div class="row"><span class="row-sub">Nog geen afwerkpanelen.</span></div>';
+      (p.panelen ?? []).forEach(pn => {
+        const pp = panelPart(pn, S()), c = cutInfo(pp);
+        const r = el(`<button class="row link" type="button"><span class="row-main"><span>${esc(pp.naam)}</span><span class="row-sub">${mm(c.L)} × ${mm(c.B)} × ${mm(pp.dikte)} · ${esc(decorName(pp.decor))}</span></span><span class="chev">${icon('right')}</span></button>`);
+        r.addEventListener('click', () => openPanel(p, pn, () => { this.keepCamera = true; this.renderProject(); }));
+        panelList.appendChild(r);
+      });
+      $('#pj-pickstop', v)?.addEventListener('click', () => { this.panelPick = null; this.keepCamera = true; this.renderProject(); });
+      $('#pj-paneel', v)?.addEventListener('click', () => {
+        this.panelPick = { step: 1 };
+        if (this.moveMode) { this.moveMode = false; this.moveKey = null; viewer.setMoveMode(false); }
+        this.keepCamera = true; this.renderProject();
+      });
     }
   },
 
@@ -207,6 +429,217 @@ const Projects = {
 };
 
 function touch(p) { p.gewijzigd = Date.now(); Store.save(); }
+
+// MARK: - Projectstandaarden, meerdere kasten tegelijk, wand maken
+
+/** Velden voor projectstandaarden en voor meerdere kasten tegelijk. kind: num | sel | decor. */
+function stdFieldRows(prefix, defs, values, emptyLabel) {
+  return defs.map(([key, label, kind, opts]) => {
+    const v = values[key] ?? '';
+    if (kind === 'num') return row(label, numHTML(`${prefix}-${key}`, v === '' ? null : v, emptyLabel));
+    if (kind === 'decor') return row(label, decorSelectHTML(`${prefix}-${key}`, v, [['', emptyLabel]]));
+    return row(label, selectHTML(`${prefix}-${key}`, [['', emptyLabel], ...opts], String(v)));
+  }).join('');
+}
+const STD_GROUPS = () => [
+  ['Maten', [['onderHoogte', 'Onderkasten: hoogte', 'num'], ['onderDiepte', 'Onderkasten: diepte', 'num'], ['hangHoogte', 'Hangkasten: hoogte', 'num'], ['hangDiepte', 'Hangkasten: diepte', 'num'],
+    ['kolomHoogte', 'Kolomkasten: hoogte', 'num'], ['kolomDiepte', 'Kolomkasten: diepte', 'num'], ['plintHoogte', 'Plinthoogte', 'num'], ['bovenHoogte', 'Onderkant hangkasten', 'num']]],
+  ['Uitzicht', [['decorKorpus', 'Decor korpus', 'decor'], ['decorFront', 'Decor fronten', 'decor'], ['frontMateriaal', 'Plaattype fronten', 'sel', PLAATTYPES.map(x => [x, x])],
+    ['bandKorpusDecor', 'Band voorkant korpus', 'sel', [['korpus', 'Zoals korpus'], ['front', 'Zoals fronten']]]]],
+  ['Greep en beslag', [['greep', 'Greep', 'sel', OPTIONS.greep], ['greepHart', 'Greep hart-op-hart', 'num'], ['serie', 'Ladegeleider', 'sel', SERIES.map(x => [x, x])]]],
+  ['Constructie', [['plaatDikte', 'Plaatdikte korpus', 'num'], ['rug', 'Rug', 'sel', OPTIONS.rug], ['plint', 'Plint', 'sel', OPTIONS.plint],
+    ['plintTrespa', 'Trespa onder de plint', 'sel', [['true', 'Ja'], ['false', 'Nee']]]]],
+];
+const parseStd = (kind, raw) => raw === '' ? null : kind === 'num' ? Number(raw) : raw === 'true' ? true : raw === 'false' ? false : raw;
+
+function openStandards(p, onDone) {
+  const st = { ...(p.standaard ?? {}), bovenHoogte: p.bovenHoogte ?? null };
+  const body = el(`<div class="content">${STD_GROUPS().map(([title, defs]) => `<div class="group"><div class="group-header">${title}</div><div class="group-body">
+      ${stdFieldRows('ps', defs, st, 'geen standaard')}</div></div>`).join('')}
+    <div class="group-footer">Leeg = geen projectstandaard (dan geldt wat bij de kast of in Instellingen staat). Een kast volgt de standaard, behalve wat je bij die kast zelf koos.</div></div>`);
+  openSheet({ title: 'Projectstandaarden', left: { label: 'Klaar' }, body, onClose: onDone });
+  for (const [, defs] of STD_GROUPS()) for (const [key, , kind] of defs) {
+    const e = $(`#ps-${key}`, body);
+    const set = v => {
+      if (key === 'bovenHoogte') p.bovenHoogte = v; else p.standaard = { ...(p.standaard ?? {}), [key]: v };
+      applyStandard(p); touch(p);
+    };
+    if (kind === 'decor') bindDecor(e, v => set(v || null));
+    else e.addEventListener('change', () => set(parseStd(kind, e.value)));
+  }
+}
+
+function openBulkEdit(p, ks, onDone) {
+  const defs = STD_GROUPS().flatMap(([, d]) => d).filter(([key]) => key !== 'bovenHoogte').map(([key, label, kind, opts]) =>
+    [key.replace(/^(onder|hang|kolom)(Hoogte|Diepte)$/, (_, g, w) => w === 'Hoogte' ? 'hoogte' : 'diepte'), label.replace(/^(Onder|Hang|Kolom)kasten: /, ''), kind, opts]);
+  const uniq = [...new Map(defs.map(d => [d[0], d])).values()];
+  const body = el(`<div class="content"><div class="group"><div class="group-body">${stdFieldRows('pb', uniq, {}, 'niet wijzigen')}</div>
+    <div class="group-footer">Alleen wat je invult, verandert bij de ${ks.length} gekozen kasten (${ks.map(x => esc(x.code)).join(', ')}). Dat geldt dan als eigen keuze van die kasten.</div></div>
+    <div class="group"><div class="group-body"><button class="row button" type="button" id="pb-go">Toepassen</button></div></div></div>`);
+  const sheet = openSheet({ title: `${ks.length} kasten aanpassen`, left: { label: 'Annuleer' }, body });
+  const vals = {};
+  for (const [key, , kind] of uniq) {
+    const e = $(`#pb-${key}`, body);
+    if (kind === 'decor') bindDecor(e, v => { vals[key] = v || null; });
+    else e.addEventListener('change', () => { vals[key] = parseStd(kind, e.value); });
+  }
+  $('#pb-go', body).addEventListener('click', () => {
+    for (const k of ks) for (const [key, v] of Object.entries(vals)) {
+      if (v === null) continue;
+      if (key === 'serie') for (const sc of k.secties ?? []) { if (sc.type === 'lade') { sc.serie = v; sc.ladeType = ''; } }
+      else k[key] = v;
+      k.eigen = [...new Set([...(k.eigen ?? []), key])];
+    }
+    touch(p); sheet.close(); onDone();
+  });
+}
+
+/** Een hele wand in één keer: wandlengte + rijtje kasttypes met breedte; de rest wordt een paslat. */
+function openWallBuilder(p, onDone) {
+  const room = roomGeometry(p);
+  const st = { muur: room.lines.length ? '0' : '', start: 'links', lengte: room.lines.length ? Math.round(Math.hypot(room.lines[0].x1 - room.lines[0].x0, room.lines[0].z1 - room.lines[0].z0)) : null, rest: 'rechts' };
+  const rows = [{ type: 'onder-lades', breedte: 600 }, { type: 'spoelbak', breedte: 800 }, { type: 'onder-greep', breedte: null }];
+  const typeOpts = () => [...(S().eigenKasten ?? []).map(t => [`eigen:${t.id}`, `★ ${t.naam}`]), ...PRESETS.map(x => [x.id, x.naam])];
+  const body = el(`<div class="content" id="wb"></div>`);
+  const sheet = openSheet({ title: 'Wand maken', left: { label: 'Annuleer' }, body, wide: true });
+  const widthOf = r => { if (Number(r.breedte) > 0) return Number(r.breedte); if (r.type.startsWith('eigen:')) return Number((S().eigenKasten ?? []).find(t => `eigen:${t.id}` === r.type)?.kast.breedte) || null; return null; };
+  const calc = () => {
+    const L = Number(st.lengte) || 0;
+    const fixed = rows.reduce((t, r) => t + (widthOf(r) ?? 0), 0), autos = rows.filter(r => !widthOf(r)).length;
+    const share = autos ? (L - fixed) / autos : 0;
+    return { L, widths: rows.map(r => widthOf(r) ?? share), rest: autos ? 0 : L - fixed, share, autos };
+  };
+  const render = () => {
+    const c = calc();
+    body.innerHTML = `<div class="group"><div class="group-body">
+        ${room.lines.length ? row('Tegen wand', selectHTML('wb-muur', [['', 'Geen (achteraan de opstelling)'], ...room.lines.map((l, i) => [String(i), `Wand ${i + 1} (${Math.round(Math.hypot(l.x1 - l.x0, l.z1 - l.z0))} mm)`])], st.muur)) : ''}
+        ${st.muur !== '' ? row('Beginnen', selectHTML('wb-start', [['links', 'Links'], ['rechts', 'Rechts']], st.start)) : ''}
+        ${row('Lengte van de wand', numHTML('wb-lengte', st.lengte))}
+      </div></div>
+      <div class="group"><div class="group-header">Kasten (van links naar rechts)</div><div class="group-body">
+        ${rows.map((r, i) => `<div class="row"><div class="row-fill" style="gap:8px">${selectHTML(`wb-t-${i}`, typeOpts(), r.type)}
+          ${numHTML(`wb-b-${i}`, r.breedte, widthOf(r) ? String(widthOf(r)) : `auto${c.autos ? ` (${Math.round(c.share)})` : ''}`)}
+          <button class="mini danger" type="button" data-del="${i}" aria-label="Verwijder">${icon('trash')}</button></div></div>`).join('')}
+        <button class="row button" type="button" id="wb-add"><span class="icon-label">${icon('plus')}Kast toevoegen</span></button>
+      </div><div class="group-footer">Laat een breedte leeg om de rest gelijk te verdelen. Hangkasten in hetzelfde rijtje komen op de hoogte van de hangkasten.</div></div>
+      <div class="group"><div class="group-body">
+        <div class="row"><span class="row-label">Samen</span><span class="row-value num">${Math.round(c.widths.reduce((t, w) => t + w, 0))} mm van ${Math.round(c.L)} mm</span></div>
+        ${c.rest > 0.5 ? row(`Rest ${Math.round(c.rest)} mm als paslat`, selectHTML('wb-rest', [['rechts', 'Rechts'], ['links', 'Links'], ['beide', 'Links en rechts'], ['geen', 'Geen paslat (open laten)']], st.rest)) : ''}
+        ${c.rest < -0.5 ? `<div class="row"><span class="row-sub" style="color:var(--danger)">De kasten zijn ${Math.round(-c.rest)} mm te breed voor de wand.</span></div>` : ''}
+        <button class="row button" type="button" id="wb-go">Maak ${rows.length} kasten</button>
+      </div></div>`;
+    $('#wb-muur', body)?.addEventListener('change', e => {
+      st.muur = e.target.value;
+      if (st.muur !== '') { const l = room.lines[Number(st.muur)]; st.lengte = Math.round(Math.hypot(l.x1 - l.x0, l.z1 - l.z0)); }
+      render();
+    });
+    $('#wb-start', body)?.addEventListener('change', e => { st.start = e.target.value; });
+    $('#wb-lengte', body).addEventListener('change', e => { st.lengte = Number(e.target.value) || null; render(); });
+    $('#wb-rest', body)?.addEventListener('change', e => { st.rest = e.target.value; });
+    rows.forEach((r, i) => {
+      $(`#wb-t-${i}`, body).addEventListener('change', e => { r.type = e.target.value; render(); });
+      $(`#wb-b-${i}`, body).addEventListener('change', e => { r.breedte = e.target.value === '' ? null : Number(e.target.value); render(); });
+    });
+    $$('[data-del]', body).forEach(b => b.addEventListener('click', () => { rows.splice(Number(b.dataset.del), 1); render(); }));
+    $('#wb-add', body).addEventListener('click', () => { rows.push({ type: 'onder-greep', breedte: null }); render(); });
+    $('#wb-go', body).addEventListener('click', () => {
+      const c2 = calc();
+      if (!rows.length || !(c2.L > 0)) { alertBox('Lengte ontbreekt', 'Vul de lengte van de wand in en kies minstens één kast.'); return; }
+      if (c2.rest < -0.5) { alertBox('Te breed', `De kasten zijn ${Math.round(-c2.rest)} mm te breed voor de wand.`); return; }
+      const v = S().voeg, made = [];
+      rows.forEach((r, i) => {
+        const k = createCabinet(p, r.type);
+        k.breedte = Math.round(c2.widths[i] * 10) / 10;
+        k.eigen = [...new Set([...(k.eigen ?? [])])];
+        p.kasten.push(k); made.push(k);
+      });
+      // Rest als paslat (breedte van de frontpaslat = rest − halve voeg).
+      let restL = 0, restR = 0;
+      if (c2.rest > 0.5 && st.rest !== 'geen') {
+        if (st.rest === 'links') restL = c2.rest; else if (st.rest === 'rechts') restR = c2.rest; else { restL = c2.rest / 2; restR = c2.rest / 2; }
+        if (restL) made[0].paslat = { ...(made[0].paslat ?? {}), links: Math.round((restL - v / 2) * 10) / 10 };
+        if (restR) made[made.length - 1].paslat = { ...(made[made.length - 1].paslat ?? {}), rechts: Math.round((restR - v / 2) * 10) / 10 };
+      }
+      // Tegen een wand van de ruimte: vrij plaatsen langs die wand, met de rug tegen de wand.
+      if (st.muur !== '') {
+        const l = room.lines[Number(st.muur)];
+        const len = Math.hypot(l.x1 - l.x0, l.z1 - l.z0), dx = (l.x1 - l.x0) / len, dz = (l.z1 - l.z0) / len;
+        const rot = Math.round(Math.atan2(dz, dx) * 180 / Math.PI * 1000) / 1000;
+        const used = c2.widths.reduce((t, w) => t + w, 0) + (st.rest === 'geen' ? 0 : restL + restR);
+        let s0 = (st.start === 'rechts' ? len - used : 0) + restL;
+        made.forEach((k, i) => {
+          Object.assign(k, { plaatsing: 'vrij', posX: Math.round((l.x0 + dx * s0) * 10) / 10, posZ: Math.round((l.z0 + dz * s0) * 10) / 10, rot, posY: null });
+          s0 += c2.widths[i];
+        });
+      }
+      applyObstacles(p);
+      touch(p); sheet.close(); onDone();
+    });
+  };
+  render();
+}
+
+/** Ruimte (wanden) en obstakels van het project bewerken. */
+function renderRoom(p, v) {
+  const box = $('#pj-ruimte', v);
+  if (!box) return;
+  const r = p.ruimte ?? { wanden: [], hoogte: 2600 };
+  const obs = p.obstakels ?? [];
+  box.innerHTML = `
+    ${(r.wanden ?? []).map((wd, i) => `<div class="row"><span class="row-label">Wand ${i + 1}</span><div class="row-fill">
+      ${numHTML(`rw-l-${i}`, wd.lengte, 'lengte')}<input class="input-num" id="rw-h-${i}" type="number" inputmode="decimal" placeholder="90°" value="${wd.hoek ?? ''}" style="max-width:64px">
+      <button class="mini danger" type="button" data-rw-del="${i}" aria-label="Verwijder">${icon('trash')}</button></div></div>`).join('')}
+    <div class="row"><div class="row-fill" style="justify-content:flex-start;gap:8px">
+      <button class="mini" type="button" id="rw-add" style="width:auto;padding:0 10px">${icon('plus')} Wand</button></div></div>
+    ${(r.wanden ?? []).length ? row('Hoogte ruimte', numHTML('rw-hoogte', r.hoogte, '2600')) : ''}
+    ${obs.map((o, i) => `<div class="row sub-head"><span class="row-sub"><b>${esc(o.naam || `Obstakel ${i + 1}`)}</b></span>
+      <button class="mini danger" type="button" data-ob-del="${i}" aria-label="Verwijder">${icon('trash')}</button></div>
+      ${[['x', 'X (vanaf links)'], ['z', 'Z (vanaf achterwand)'], ['breedte', 'Breedte'], ['diepte', 'Diepte'], ['hoogte', 'Hoogte']].map(([key, label]) => row(label, numHTML(`ob-${key}-${i}`, o[key], key === 'hoogte' ? 'tot plafond' : 'mm'))).join('')}`).join('')}
+    <div class="row"><div class="row-fill" style="justify-content:flex-start;gap:8px">
+      <button class="mini" type="button" id="ob-add" style="width:auto;padding:0 10px">${icon('plus')} Obstakel (koker, kolom)</button></div></div>`;
+  const save = () => { p.ruimte = r; p.obstakels = obs; applyObstacles(p); touch(p); Projects.keepCamera = true; Projects.renderProject(); };
+  (r.wanden ?? []).forEach((wd, i) => {
+    $(`#rw-l-${i}`, box).addEventListener('change', e => { wd.lengte = Number(e.target.value) || null; save(); });
+    $(`#rw-h-${i}`, box).addEventListener('change', e => { wd.hoek = e.target.value === '' ? null : Number(e.target.value); save(); });
+  });
+  $$('[data-rw-del]', box).forEach(b => b.addEventListener('click', () => { r.wanden.splice(Number(b.dataset.rwDel), 1); save(); }));
+  $('#rw-add', box).addEventListener('click', () => { r.wanden = [...(r.wanden ?? []), { lengte: (r.wanden ?? []).length ? 2000 : 3000, hoek: 90 }]; save(); });
+  $('#rw-hoogte', box)?.addEventListener('change', e => { r.hoogte = Number(e.target.value) || null; save(); });
+  obs.forEach((o, i) => {
+    for (const key of ['x', 'z', 'breedte', 'diepte', 'hoogte']) $(`#ob-${key}-${i}`, box).addEventListener('change', e => { o[key] = e.target.value === '' ? null : Number(e.target.value); save(); });
+  });
+  $$('[data-ob-del]', box).forEach(b => b.addEventListener('click', () => { obs.splice(Number(b.dataset.obDel), 1); save(); }));
+  $('#ob-add', box).addEventListener('click', () => { obs.push({ id: uid(), naam: `Obstakel ${obs.length + 1}`, x: 0, z: 0, breedte: 300, diepte: 300, hoogte: null }); save(); });
+}
+
+/** Afwerkpaneel aanpassen: maten, dikte, materiaal, decor, kantenband. */
+function openPanel(project, pn, onChange) {
+  const pp = panelPart(pn, S());
+  const e1 = Math.abs(pn.a1 - pn.a0), e2 = Math.abs(pn.b1 - pn.b0);
+  const names = { x: ['diepte', 'hoogte'], y: ['breedte', 'diepte'], z: ['breedte', 'hoogte'] }[pn.as];
+  const body = el(`<div class="content"><div class="group"><div class="group-body">
+      <div class="row"><span class="row-label">Naam</span><div class="row-fill"><input class="input-plain" id="pn-naam" value="${esc(pn.naam ?? '')}"></div></div>
+      ${row(`Maat (${names[1]})`, numHTML('pn-b', r1(e2)))}
+      ${row(`Maat (${names[0]})`, numHTML('pn-a', r1(e1)))}
+      ${row('Dikte', numHTML('pn-dikte', pn.dikte, `${S().front} (front)`))}
+      ${row('Materiaal', selectHTML('pn-mat', [['front', 'Zoals de fronten'], ['korpus', 'Zoals het korpus']], pn.mat ?? 'front'))}
+      ${row('Decor', decorSelectHTML('pn-decor', pn.decor ?? '', [['', `Standaard (${pp.decor})`]]))}
+      ${row('Plaattype', selectHTML('pn-type', [['', `Standaard (${pp.plaattype})`], ...PLAATTYPES.map(x => [x, x])], pn.plaattype ?? ''))}
+      ${row('Kantenband rondom', selectHTML('pn-band', [['', `Standaard (${S().bandFront} mm)`], ['0', 'Geen'], ['1', '1 mm'], ['2', '2 mm']], pn.band == null ? '' : String(pn.band)))}
+    </div><div class="group-footer">De maat telt vanaf het eerste punt dat je aantikte. Het paneel ligt tegen het vlak dat je koos; de dikte gaat naar buiten.</div></div>
+    <div class="group"><div class="group-body"><button class="row button danger" type="button" id="pn-del">Paneel verwijderen</button></div></div></div>`);
+  const sheet = openSheet({ title: pn.naam || 'Afwerkpaneel', left: { label: 'Klaar' }, body, onClose: onChange });
+  const save = () => { touch(project); };
+  $('#pn-naam', body).addEventListener('input', e => { pn.naam = e.target.value; save(); });
+  $('#pn-a', body).addEventListener('change', e => { const v = Number(e.target.value); if (v > 0) { pn.a1 = pn.a0 + Math.sign(pn.a1 - pn.a0 || 1) * v; save(); } });
+  $('#pn-b', body).addEventListener('change', e => { const v = Number(e.target.value); if (v > 0) { pn.b1 = pn.b0 + Math.sign(pn.b1 - pn.b0 || 1) * v; save(); } });
+  $('#pn-dikte', body).addEventListener('change', e => { pn.dikte = e.target.value === '' ? null : Number(e.target.value); save(); });
+  $('#pn-mat', body).addEventListener('change', e => { pn.mat = e.target.value; save(); });
+  bindDecor($('#pn-decor', body), val => { pn.decor = val || null; save(); });
+  $('#pn-type', body).addEventListener('change', e => { pn.plaattype = e.target.value || null; save(); });
+  $('#pn-band', body).addEventListener('change', e => { pn.band = e.target.value === '' ? null : Number(e.target.value); save(); });
+  $('#pn-del', body).addEventListener('click', () => { project.panelen = (project.panelen ?? []).filter(x => x !== pn); save(); sheet.close(); });
+}
 
 /** 3D-weergave maken; als het toestel geen 3D aankan, een melding in plaats van een fout. */
 function makeViewer(container, options) {
@@ -235,13 +668,59 @@ function bindViewerTools(root, viewer, prefix) {
 }
 
 /** Keuzelijst met de 20 kasttypes, per groep. */
-function pickPreset(onPick) {
+function pickPreset(onPick, { eigen = true } = {}) {
   const groups = [...new Set(PRESETS.map(p => p.groep))];
-  const body = el(`<div class="content">${groups.map(g => `<div class="group"><div class="group-header">${g}</div><div class="group-body">
+  const mine = eigen ? (S().eigenKasten ?? []) : [];
+  const body = el(`<div class="content">
+    ${mine.length ? `<div class="group"><div class="group-header">Mijn kasten</div><div class="group-body">
+      ${mine.map(t => `<div class="row"><button class="row-main link-btn" type="button" data-id="eigen:${t.id}" style="text-align:left;flex:1"><span>${esc(t.naam)}</span><span class="row-sub">${esc(PRESETS.find(x => x.id === t.kast.type)?.naam ?? '')} · ${t.kast.breedte ?? '?'} × ${t.kast.hoogte ?? '?'} × ${t.kast.diepte ?? '?'}</span></button>
+        <button class="mini danger" type="button" data-del="${t.id}" aria-label="Verwijder">${icon('trash')}</button></div>`).join('')}
+    </div></div>` : ''}
+    ${groups.map(g => `<div class="group"><div class="group-header">${g}</div><div class="group-body">
     ${PRESETS.filter(p => p.groep === g).map(p => `<button class="row link" type="button" data-id="${p.id}"><span>${esc(p.naam)}</span><span class="chev">${icon('right')}</span></button>`).join('')}
     </div></div>`).join('')}</div>`);
   const sheet = openSheet({ title: 'Kasttype kiezen', left: { label: 'Annuleer' }, body });
   $$('[data-id]', body).forEach(b => b.addEventListener('click', () => { sheet.close(); onPick(b.dataset.id); }));
+  $$('[data-del]', body).forEach(b => b.addEventListener('click', async () => {
+    const t = mine.find(x => x.id === b.dataset.del);
+    const ok = await alertBox('Eigen kasttype verwijderen?', `"${t.naam}" verdwijnt uit "Mijn kasten". Kasten die je er al mee maakte blijven.`, [{ label: 'Annuleer', role: 'cancel', value: 'no' }, { label: 'Verwijder', role: 'destructive', value: 'yes' }]);
+    if (ok !== 'yes') return;
+    S().eigenKasten = mine.filter(x => x !== t); Store.save(); sheet.close(); pickPreset(onPick, { eigen });
+  }));
+}
+
+/** Nieuwe kast in een project: van een kasttype of een eigen kasttype, met de projectstandaarden. */
+function createCabinet(p, id) {
+  let k;
+  if (id.startsWith('eigen:')) {
+    const tpl = (S().eigenKasten ?? []).find(x => `eigen:${x.id}` === id);
+    k = JSON.parse(JSON.stringify(tpl.kast));
+  } else {
+    k = newCabinet(id);
+    // Wat het kasttype zelf vastlegt (bv. geen rug bij de spoelbak, greeploos) blijft: telt als eigen keuze.
+    k.eigen = Object.keys(PRESETS.find(x => x.id === id)?.kast ?? {}).filter(key => STD_KEYS.includes(key));
+  }
+  k.id = uid();
+  const used = new Set(p.kasten.map(x => x.code));
+  let n = p.kasten.length + 1;
+  while (used.has(`K${n}`)) n++;
+  k.code = `K${n}`;
+  k.plaatsing = 'auto';
+  for (const key of ['posX', 'posY', 'posZ', 'rot']) delete k[key];
+  applyStandard(p, k);
+  return k;
+}
+
+/** Eigen kasttype bewaren (alle keuzes van deze kast), om in elk project te hergebruiken. */
+async function saveOwnType(k) {
+  const r = await alertBox('Bewaren als eigen kasttype', 'Onder welke naam?', [{ label: 'Annuleer', role: 'cancel', value: 'no' }, { label: 'Bewaar', value: 'ok' }],
+    { input: { value: `${PRESETS.find(x => x.id === k.type)?.naam ?? 'Kast'} ${k.breedte ?? ''}`.trim() } });
+  if (r.value !== 'ok' || !r.text.trim()) return;
+  const kast = JSON.parse(JSON.stringify(k));
+  for (const key of ['id', 'code', 'plaatsing', 'posX', 'posY', 'posZ', 'rot', 'uitsparing']) delete kast[key];
+  S().eigenKasten = [...(S().eigenKasten ?? []), { id: uid(), naam: r.text.trim(), kast }];
+  Store.save();
+  alertBox('Bewaard', `"${r.text.trim()}" staat nu bovenaan bij "Kast toevoegen", in elk project.`);
 }
 
 // MARK: - Kasteditor
@@ -331,6 +810,9 @@ function openCabinet(project, k, selectId = null) {
         <div id="f-rug-d">${row('Dikte rug', numHTML('f-rugDikte', k.rugDikte, `${k.rug === 'opgeschroefd' ? S().rugDik : S().rug} (standaard)`))}</div>
         ${k.secties.some(x => x.type === 'toestel') ? `<div class="row"><span class="row-label">Verluchting onder en boven</span>${toggleHTML('f-verluchting', k.verluchting ?? k.secties.some(x => x.verluchting))}</div>` : ''}
         ${k.rug === 'geen' ? `<div class="row"><span class="row-label">Wegneembare rug (${S().wegneembareRugHoogte} mm)</span>${toggleHTML('f-wegneembareRug', k.wegneembareRug)}</div>` : ''}
+        ${row('Uitsparing achteraan (koker)', selectHTML('f-usHoek', [['', 'Geen'], ['links', 'Links achter'], ['rechts', 'Rechts achter']], k.uitsparing?.hoek ?? ''))}
+        ${k.uitsparing?.hoek ? `${row('Uitsparing breedte', numHTML('f-usB', k.uitsparing.breedte))}${row('Uitsparing diepte', numHTML('f-usD', k.uitsparing.diepte))}
+          ${k.uitsparing.auto ? '<div class="row"><span class="row-sub">Automatisch berekend uit een obstakel in het project. Pas je de maat hier aan, dan blijft jouw maat staan.</span></div>' : ''}` : ''}
         ${row('Paslat links (breedte)', numHTML('f-paslat-links', k.paslat?.links, 'geen'))}
         ${row('Paslat rechts (breedte)', numHTML('f-paslat-rechts', k.paslat?.rechts, 'geen'))}
         <div class="row"><span class="row-label">Zijwand links in zicht</span>${toggleHTML('f-zichtL', k.zichtL)}</div>
@@ -346,7 +828,7 @@ function openCabinet(project, k, selectId = null) {
 
       <div class="group"><div class="group-header">Fronten</div><div class="group-body">
         ${row('Fronten', selectHTML('f-front', OPTIONS.front, k.front))}
-        ${k.front !== 'inliggend' ? row('Uitsteken onder', numHTML('f-uitstekOnder', k.uitstekOnder || '', '0')) + row('Uitsteken boven', numHTML('f-uitstekBoven', k.uitstekBoven || '', '0')) : ''}
+        ${k.front !== 'inliggend' ? row('Uitsteken onder', numHTML('f-uitstekOnder', k.uitstekOnder || '', k.greep === 'greeplijst' && PRESETS.find(x => x.id === k.type)?.groep === 'Bovenkasten' ? `${S().hangGreepUitsteek} (greeploos)` : '0')) + row('Uitsteken boven', numHTML('f-uitstekBoven', k.uitstekBoven || '', '0')) : ''}
         <div id="f-uitstek-info"></div>
         ${row('Houtstructuur fronten', selectHTML('f-houtDoorlopend', [['nee', 'Niet doorlopend'], ['kast', 'Doorlopend in deze kast'], ['vorige', 'Doorlopend met de vorige kast']], k.houtDoorlopend ?? 'nee'))}
         ${row('Plaattype fronten', selectHTML('f-frontMateriaal', [['', `Standaard (${S().frontMateriaal})`], ...PLAATTYPES.map(x => [x, x])], k.frontMateriaal ?? ''))}
@@ -378,10 +860,13 @@ function openCabinet(project, k, selectId = null) {
       if (!e) return;
       e.addEventListener(e.type === 'checkbox' ? 'change' : (e.tagName === 'SELECT' ? 'change' : 'input'), () => {
         k[key] = e.type === 'checkbox' ? e.checked : kind === 'num' ? (e.value === '' ? null : Number(e.value)) : e.value;
+        markEigen(key);
         if (['blindBreedte', 'plint', 'rug', 'greep', 'front', 'plaatsing'].includes(key)) renderForm();
         update();
       });
     };
+    $('#f-usHoek', form)?.addEventListener('change', e => { k.uitsparing = e.target.value ? { breedte: 100, diepte: 100, ...(k.uitsparing ?? {}), hoek: e.target.value, auto: false } : null; renderForm(); update(); });
+    for (const [id, key] of [['f-usB', 'breedte'], ['f-usD', 'diepte']]) $(`#${id}`, form)?.addEventListener('input', e => { k.uitsparing = { ...(k.uitsparing ?? {}), [key]: e.target.value === '' ? null : Number(e.target.value), auto: false }; update(); });
     for (const kant of ['links', 'rechts']) $(`#f-paslat-${kant}`, form)?.addEventListener('input', e => {
       k.paslat = { ...(k.paslat ?? {}), [kant]: e.target.value === '' ? null : Number(e.target.value) };
       update();
@@ -399,8 +884,9 @@ function openCabinet(project, k, selectId = null) {
     ['zichtL', 'zichtR', 'verluchting', 'wegneembareRug', 'plintTrespa'].forEach(key => bindVal('f-' + key, key));
     for (const key of ['decorKorpus', 'decorFront', 'decorRug', 'bandKorpusDecor']) {
       const e = $('#f-' + key, form);
-      if (e) bindDecor(e, v => { k[key] = v || null; update(); });
+      if (e) bindDecor(e, v => { k[key] = v || null; markEigen(key); update(); });
     }
+    eigenMarkers();
     $('#f-plint-h', form).classList.toggle('hidden', k.plint === 'geen');
     $('#f-rug-d', form).classList.toggle('hidden', k.rug === 'geen');
     $('#f-type', form).addEventListener('click', () => pickPreset(async id => {
@@ -415,6 +901,25 @@ function openCabinet(project, k, selectId = null) {
     }));
     $('#f-addsec', form).addEventListener('click', () => { k.secties.push(sec('deur', { legplanken: 1 })); renderSections(); update(); });
     renderSections();
+  }
+
+  /** Veld bij deze kast zelf gekozen: volgt de projectstandaard niet meer. */
+  function markEigen(key) {
+    if (!STD_KEYS.includes(key)) return;
+    k.eigen = [...new Set([...(k.eigen ?? []), key])];
+  }
+  /** Bij eigen keuzes die afwijken van de projectstandaard: een knop om terug te zetten. */
+  function eigenMarkers() {
+    for (const key of k.eigen ?? []) {
+      const std = stdValueFor(project, k, key);
+      if (std === undefined) continue;
+      const e = $(`#f-${key}`, form);
+      const r = e?.closest('.row');
+      if (!r || $('.std-reset', r)) continue;
+      const b = el(`<button class="mini std-reset" type="button" title="Terug naar de projectstandaard (${esc(String(std))})" style="width:auto;padding:0 8px;font-size:12px">↺ project</button>`);
+      b.addEventListener('click', () => { k.eigen = (k.eigen ?? []).filter(x => x !== key); applyStandard(project, k); renderForm(); update(); });
+      r.appendChild(b);
+    }
   }
 
   function renderSections() {
@@ -451,7 +956,7 @@ function openCabinet(project, k, selectId = null) {
         e.addEventListener(ev, () => {
           s[field] = e.type === 'checkbox' ? e.checked : kind === 'num' ? (e.value === '' ? null : Number(e.value)) : e.value;
           if (field === 'type') { renderForm(); update(); return; }
-          if (field === 'serie') { s.ladeType = ''; renderSections(); update(); return; }
+          if (field === 'serie') { s.ladeType = ''; markEigen('serie'); renderSections(); update(); return; }
           update();
           if (field === 'lades') { renderSections(); const el2 = $(`#s-lades-${i}`, form); el2?.focus(); el2?.setSelectionRange?.(99, 99); return; }
           if (['hoogte', 'nis', 'nisBreedte', 'nisDiepte'].includes(field)) refreshZoneHints();
@@ -505,13 +1010,15 @@ function openCabinet(project, k, selectId = null) {
       <div class="row"><div class="row-fill" style="justify-content:flex-start;gap:8px">
         <button class="mini" type="button" data-st-add>${icon('plus')} Stijl</button>
         ${st.length ? `<button class="mini" type="button" data-st-eq>Gelijk verdelen</button>` : ''}</div></div>
+      ${st.length ? row('Stijlen terug van voorkant', numHTML(`s-stijlTerug-${i}`, s.stijlTerug, 'gelijk')) : ''}
       <div class="row sub-head"><span class="row-sub"><b>Vaste legplanken</b> (vrije hoogte eronder, vanaf de onderkant van het vak)</span></div>
       ${vl.map((f, j) => `<div class="row"><span class="row-label">Vast ${j + 1}</span><div class="row-fill">${numHTML(`s-vl-${i}-${j}`, f.hoogte)}
         ${st.length ? selectHTML(`s-vld-${i}-${j}`, delen, String(f.deel ?? 0)) : ''}
         <button class="mini danger" type="button" data-vl-del="${j}" aria-label="Verwijder">${icon('trash')}</button></div></div>`).join('')}
       <div class="row"><div class="row-fill" style="justify-content:flex-start;gap:8px">
         <button class="mini" type="button" data-vl-add>${icon('plus')} Vaste legplank</button>
-        ${vl.length ? `<button class="mini" type="button" data-vl-eq>Gelijk verdelen</button>` : ''}</div></div>`;
+        ${vl.length ? `<button class="mini" type="button" data-vl-eq>Gelijk verdelen</button>` : ''}</div></div>
+      ${vl.length ? row('Vaste legplanken terug van voorkant', numHTML(`s-vastTerug-${i}`, s.vastTerug, 'gelijk')) : ''}`;
   }
 
   function bindDivision(s, i, card, zone) {
@@ -546,6 +1053,7 @@ function openCabinet(project, k, selectId = null) {
       $(`#s-vl-${i}-${j}`, card).addEventListener('change', e => { f.hoogte = Number(e.target.value) || 0; update(); });
       $(`#s-vld-${i}-${j}`, card)?.addEventListener('change', e => { f.deel = Number(e.target.value) || 0; update(); });
     });
+    for (const key of ['stijlTerug', 'vastTerug']) $(`#s-${key}-${i}`, card)?.addEventListener('change', e => { s[key] = e.target.value === '' ? null : Number(e.target.value); update(); });
     $$('[data-vl-del]', card).forEach(b => b.addEventListener('click', () => { s.vasteLegplanken.splice(Number(b.dataset.vlDel), 1); redo(); }));
     $('[data-vl-add]', card).addEventListener('click', () => { s.vasteLegplanken = [...(s.vasteLegplanken ?? []), { hoogte: 0, deel: 0 }]; eqVast(); redo(); });
     $('[data-vl-eq]', card)?.addEventListener('click', () => { eqVast(); redo(); });
@@ -853,14 +1361,18 @@ function panelSVG(p, names) {
 function cutRows(project) {
   const rows = [];
   const hardware = {};
-  for (const k of project.kasten) {
-    const res = buildCabinet(k, S());
+  for (const { k, res, parts } of projectParts(project, S())) {
     if (res.error) continue;
-    for (const p of sawParts(res.parts, S())) {
+    for (const p of sawParts(parts, S())) {
       const c = cutInfo(p);
-      rows.push({ kast: k.code, naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...c });
+      rows.push({ kast: p.kastLabel ?? k.code, naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...c });
     }
     for (const h of res.hardware) hardware[h.naam] = (hardware[h.naam] ?? 0) + h.aantal;
+  }
+  // Afwerkpanelen van het project.
+  for (const pn of project.panelen ?? []) {
+    const p = panelPartFull(pn, S());
+    rows.push({ kast: 'Afwerking', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p) });
   }
   // Gelijke onderdelen binnen dezelfde kast samenvoegen.
   const merged = [];
@@ -1232,7 +1744,7 @@ const SETTING_GROUPS = [
   ['Markeringen', [['pootRandZij', 'Stelpoot: vanaf zijkant bodem'], ['pootVoor', 'Stelpoot: vanaf voorkant'], ['pootAchter', 'Stelpoot: vanaf achterkant'], ['pootVierkant', 'Stelpoot: vierkant puntjes'], ['pootMiddenVoor', 'Middenpoot voor vanaf breedte'], ['pootMiddenAchter', 'Middenpoot achter vanaf breedte'], ['pootDia', 'Puntje Ø'], ['pootDiepte', 'Puntje diepte'], ['hoekMerkRand', 'Merk zijwand: vanaf onder/achter'], ['hoekMerkDia', 'Merk zijwand Ø'], ['hoekMerkDiepte', 'Merk zijwand diepte']]],
   ['Ladegeleiders', [['frontBevZij', 'Frontbevestiging: vanaf binnenkant zijwand'], ['frontBevDia', 'Frontbevestiging Ø'], ['frontBevDiepte', 'Frontbevestiging diepte'], ['geleiderDia', 'Punten geleider Ø (euroschroef)'], ['geleiderDiepte', 'Punten geleider diepte'], ['geleiderAchterVrij', 'Laatste punt min. voor einde geleider'], ['ladeSponningBreedte', 'Bodem/rug: sponning breedte'], ['ladeSponningDiepte', 'Bodem/rug: sponning diepte'], ['ladeSchroefAfstand', 'Schroeven bodem in rug: afstand']]],
   ['Led-verlichting', [['ledBreedte', 'Breedte groef'], ['ledDiepte', 'Diepte groef'], ['ledAfstand', 'Standaard afstand tot rand'], ['ledKabelDia', 'Kabelgat Ø'], ['ledKabelAfstand', 'Kabelgat vanaf einde groef']]],
-  ['Overige', [['regelBreedte', 'Breedte regels'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
+  ['Overige', [['regelBreedte', 'Breedte regels'], ['hangGreepUitsteek', 'Hangkast greeploos: front steekt onder uit'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
 ];
 
 const SettingsView = {

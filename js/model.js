@@ -36,7 +36,8 @@ const DEFAULT_SETTINGS = {
   ophangDia: 10,
   ophangDiepte: 12.5,
   clamexMarge: 100,        // eerste en laatste Clamex vanaf voor- en achterkant
-  clamexMaxAfstand: 150,  // zeker om de 150 mm een Clamex
+  clamexMaxAfstand: 150,
+  clamexMinHoek: 22.5,       // kleinste verstekhoek per stuk voor de Clamex-macro (SAFE2 in Lamello_4s_45)  // zeker om de 150 mm een Clamex
   clamexDeuvel: 50.5,      // deuvel aan weerszijden van elke Clamex
   deuvelEersteVoor: 30,    // P110: deuvels op 30 en 62 van voor, P−89 en P−57 van achter, ertussen ≤ 130
   deuvelPaar: 32,
@@ -80,7 +81,7 @@ const DEFAULT_SETTINGS = {
   paslatSchroefAfstand: 300,
   trespaDikte: 10,          // Trespa-strook onder de plint
   wegneembareRugHoogte: 200, // spoelbakkast: wegneembare rugstrook
-  wegneembareRugAchter: 13,  // afstand van de strook tot de achterkant (de achterste drager zit erachter)
+  wegneembareRugAchter: 50,  // afstand van de strook tot de achterkant: ruimte om de leidingen erachter te krijgen
   latAfstand: 800,         // kolomkast: lat achter de rug als er geen tussenbodem is, ongeveer om de 800 mm
   latBreedte: 100,
   // Markeringen (zoals in de P110-programma's): puntjes voor de stelpoten onder de bodem en een merkteken onderaan achteraan op de zijwand.
@@ -118,6 +119,10 @@ const DEFAULT_SETTINGS = {
   blindPlaatTussen: 32,     // afstand tussen de twee gaten, boven elkaar
   blindPlaatDia: 5,
   blindPlaatDiepte: 10,
+  hangGreepUitsteek: 30,     // hangkast greeploos: fronten steken zoveel onderaan uit (vastnemen langs onder)
+  pushDia: 10,               // push-open: boring van voor in het korpus voor de drevel
+  pushDiepte: 80,
+  pushRand: 60,              // vanaf de boven-/onderkant van de front (en bij twee deuren vanaf de opening)
   greepHoogteKolomZonder: 1050, // kolomkast zonder toestel: greep zo dicht mogelijk bij deze hoogte
   greepVanOnder: 50,       // ... bij een deur boven die hoogte: onderste greepgat vanaf de onderkant van de deur
   greepDia: 5,
@@ -364,7 +369,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   const rugFront = groef ? zBack + S.rugInsprong + S.groefBreedte : zBack;
   const frontInset = k.front === 'inliggend' ? fd : 0;
   const gd = S.groefDiepte, gw = S.groefBreedte, gs = S.rugSpeling;
-  const greeplijst = k.greep === 'greeplijst';
+  // Hangkast greeploos: geen greeplijst, de fronten steken onderaan uit zodat je ze langs onder vastneemt.
+  const hangGreeploos = k.greep === 'greeplijst' && PRESETS.find(x => x.id === k.type)?.groep === 'Bovenkasten';
+  const greeplijst = k.greep === 'greeplijst' && !hangGreeploos;
 
   // Vaste code per onderdeel (naam + volgnummer), zodat aangepaste kantenbanden bewaard blijven.
   const seen = {};
@@ -547,9 +554,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   if (hasBodem) {
     // Verluchting: de buitenste (onderste) bodem springt terug, de binnenste ligt gelijk met de voorkant van de zijwand.
     const terug = verlOnder ? S.verluchtingInsprong : 0;
+    // Spoelbakkast (wegneembare rug, geen vaste rug): de bodem begint even ver van de muur als de wegneembare rug,
+    // zodat de leidingen erachter vrij naar boven kunnen.
+    const leidingen = k.wegneembareRug && k.rug === 'geen' ? S.wegneembareRugAchter : 0;
     const bodem = rugInBodemGroef
       ? horizontal({ naam: 'Bodem', y: 0, z: zBack, d: Dk - terug, extra: { id: 'bodem' } })
-      : horizontal({ naam: verlOnder ? 'Bodem (verluchting, achteruit)' : 'Bodem', y: 0, z: voorRug, d: D - voorRug - terug, extra: { id: 'bodem' } });
+      : horizontal({ naam: verlOnder ? 'Bodem (verluchting, achteruit)' : 'Bodem', y: 0, z: voorRug + leidingen, d: D - voorRug - terug - leidingen, extra: { id: 'bodem' } });
     if (rugInBodemGroef) rugGroove(bodem, 'boven');
     // Puntjes voor de stelpoten aan de onderkant van de bodem: per poot 4 puntjes in een vierkant.
     if (S.pootMerken && k.plint === 'stelpoten' && P > 0 && !hangkast) {
@@ -588,7 +598,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         const edge = sd.left ? 'u0' : 'u1';
         for (const c of clamexPositions(Ls, S)) {
           const q = at(c);
-          sd.ops.push({ kind: 'clamex', face: 'binnen', u: sideU(q.z), v: sideV(q.y), naam: 'Clamex' });
+          // De Clamex in de zijwand volgt de schuine lijn (richting achter → voor).
+          sd.ops.push({ kind: 'clamex', face: 'binnen', u: sideU(q.z), v: sideV(q.y), dir: [cosA, sinA], naam: 'Clamex (schuin)' });
           top.ops.push({ kind: 'clamex', edge, pos: posOf(c), naam: 'Clamex' });
           count('Lamello Clamex P-14');
           for (const d of [c - S.clamexDeuvel, c + S.clamexDeuvel]) {
@@ -614,6 +625,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const joint = left => ((left !== rechtsHoog) ? 90 - deg : 90 + deg);
       for (const sd of sides) {
         const half = r1(joint(sd.left) / 2);
+        if (half < S.clamexMinHoek) {
+          sd.ops.push({ kind: 'verstek', edge: 'v1', hoek: half, naam: 'Verstek zagen (A-hoek)' });
+          top.ops.push({ kind: 'verstek', edge: sd.left ? 'u0' : 'u1', hoek: half, naam: 'Verstek zagen (A-hoek)' });
+          warnings.push(`Verstek ${sd.left ? 'links' : 'rechts'} (${half}°) is te scherp voor Clamex: gezaagd met de gekantelde zaag en verlijmd.`);
+          continue;
+        }
         for (const c of clamexPositions(dd, S)) {
           sd.ops.push({ kind: 'clamex', edge: 'v1', pos: sideU(D - c), hoek: half, naam: 'Clamex (verstek)' });
           top.ops.push({ kind: 'clamex', edge: sd.left ? 'u0' : 'u1', pos: dd - c, hoek: half, naam: 'Clamex (verstek)' });
@@ -646,15 +663,15 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     if (verl) horizontal({ naam: 'Regel verluchting (binnen)', y: H - 2 * t - S.verluchtingSpleet, z: zFront, d: rb, regel: true, extra: { id: 'regel-verluchting' } });
   }
 
-  // Wegneembare rug (bv. spoelbakkast): een strook onder de bovenkant, tussen legplankdragers geschoven
-  // (per zijwand twee dragers achter en twee voor de strook).
+  // Wegneembare rug (bv. spoelbakkast): een strook die op de bodem staat, wegneembareRugAchter van de achterkant
+  // (ruimte voor de leidingen), tussen legplankdragers geschoven (per zijwand twee dragers achter en twee voor de strook).
   if (k.wegneembareRug) {
     if (k.rug !== 'geen') warnings.push('Een wegneembare rug kan alleen bij een kast zonder vaste rug (Rug: geen rug).');
     else {
-      const hR = S.wegneembareRugHoogte, y1 = H - (k.top === 'staand' ? rb : t), y0 = y1 - hR;
+      const hR = S.wegneembareRugHoogte, y0 = bottomBand, y1 = Math.min(y0 + hR, H - (k.top === 'staand' ? rb : t));
       const zp = zBack + S.wegneembareRugAchter;
       add({ id: 'rug-weg', naam: 'Wegneembare rug', rol: 'rug', mat: 'korpus', dikte: t, grain: 'u', bandPlaat: true, edges: { u0: S.bandKorpus, u1: S.bandKorpus, v0: S.bandKorpus, v1: S.bandKorpus },
-        box: { x: t + 1, y: y0, z: zp, w: W - 2 * t - 2, h: hR, d: t }, uLen: W - 2 * t - 2, vLen: hR });
+        box: { x: t + 1, y: y0, z: zp, w: W - 2 * t - 2, h: y1 - y0, d: t }, uLen: W - 2 * t - 2, vLen: y1 - y0 });
       for (const sd of sides) for (const u of [zp - zBack - S.systeemDia / 2 - 0.5, zp - zBack + t + S.systeemDia / 2 + 0.5]) {
         for (const yy of [y0 + 40, y1 - 40]) sd.ops.push({ kind: 'boring', face: 'binnen', u, v: sideV(yy), dia: S.systeemDia, diepte: S.systeemDiepte, naam: 'Legplankdrager wegneembare rug' });
       }
@@ -814,6 +831,36 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   /** Bovenkant waar de greeplijst bovenaan een vak tegen komt: de kast zelf (onder het werkblad), of het paneel erboven. */
   const greepTop = z => (z.y1 >= H - 0.01 ? H : z.open1);
 
+  /**
+   * Push-open: een boring van voor in het korpus (Ø pushDia × pushDiepte) waar de drevel komt, op de best bereikbare
+   * hoogte: onderkast bovenaan de front, hangkast onderaan, kolomkast op de greephoogte. Bij één deur (of een lade) in
+   * de voorkant van de zijwand aan de openingskant; bij twee deuren in de voorkant van het paneel erboven
+   * (hangkast: eronder), pushRand van de opening.
+   */
+  const pushBore = (f, freeLeft, nDoors, drawer = false) => {
+    const preset = PRESETS.find(x => x.id === k.type);
+    const hang = preset?.groep === 'Bovenkasten', kolom = hasToestel || preset?.groep === 'Kolomkasten';
+    const y0 = f.box.y, y1 = f.box.y + (f.edgeH ? Math.min(f.edgeH.u0, f.edgeH.u1) : f.vLen);
+    const clampY = y => Math.max(y0 + 40, Math.min(y1 - 40, y));
+    let y = drawer ? (y0 + y1) / 2 : kolom ? clampY((hasToestel ? S.greepHoogteKolom : S.greepHoogteKolomZonder) - P) : hang ? y0 + S.pushRand : y1 - S.pushRand;
+    y = clampY(y);
+    const atSideL = Math.abs(f.box.x - frontX0) < 1, atSideR = Math.abs(f.box.x + f.box.w - frontX1) < 1;
+    const useSide = drawer || nDoors === 1 ? (freeLeft ? (atSideL ? sideL : null) : (atSideR ? sideR : null)) : null;
+    if (useSide && parts.includes(useSide)) {
+      useSide.ops.push({ kind: 'boring', edge: 'u1', pos: sideV(y), dia: S.pushDia, diepte: S.pushDiepte, naam: 'Push-open' });
+    } else {
+      // In de voorkant van een liggend paneel boven (of bij een hangkast onder) de deur.
+      const xe = freeLeft ? f.box.x + S.pushRand : f.box.x + f.box.w - S.pushRand;
+      const cands = parts.filter(q => q.rol === 'liggend' && q.box.z + q.box.d >= D - frontInset - 1 && q.box.x <= xe && q.box.x + q.box.w >= xe);
+      const hp = hang ? cands.filter(q => q.box.y + q.box.h <= f.box.y + 40).sort((a, b) => b.box.y - a.box.y)[0]
+        : cands.filter(q => q.box.y >= f.box.y + f.vLen - 60).sort((a, b) => a.box.y - b.box.y)[0];
+      if (!hp) { warnings.push(`${f.naam}: geen plaats gevonden voor de push-open boring.`); return; }
+      if (hp.box.h < S.pushDia + 4 && hp.box.d < S.pushDia + 4) return;
+      hp.ops.push({ kind: 'boring', edge: 'v1', pos: xe - hp.box.x, dia: S.pushDia, diepte: Math.min(S.pushDiepte, hp.vLen - 10), naam: 'Push-open' });
+    }
+    count('Push-open drevel');
+  };
+
   const handleHoles = (p, vertical, freeLeft) => {
     if (k.greep !== 'greep') return;
     const eigen = k.frontGreep?.[p.id];
@@ -866,7 +913,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
    */
   const divide = (z, s, n) => {
     const h0 = z.open0, h1 = z.open1;
-    const dStijl = D - rugFront - frontInset - (greeplijst ? gdp + t : 0);
+    // Gelijk met de voorkant van de kast, of een gekozen maat terug (per vak).
+    const stijlTerug = Math.max(0, Number(s.stijlTerug) || 0), vastTerug = Math.max(0, Number(s.vastTerug) || 0);
+    const dStijl = D - rugFront - frontInset - (greeplijst ? gdp + t : 0) - stijlTerug;
     const fixed = (s.vasteLegplanken ?? []).filter(f => Number(f.hoogte) > 0)
       .map(f => ({ y: h0 + Number(f.hoogte), deel: Number(f.deel) || 0 }))
       .filter(f => {
@@ -881,7 +930,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     });
     // Vaste legplanken over alle delen: doorlopend tussen de zijwanden.
     const full = fixed.filter(f => !f.deel || !xs.length).map(f => f.y).sort((a, b) => a - b);
-    full.forEach(y => horizontal({ naam: 'Vaste legplank', y, z: rugFront, d: D - rugFront - frontInset }));
+    full.forEach(y => horizontal({ naam: 'Vaste legplank', y, z: rugFront, d: D - rugFront - frontInset - vastTerug }));
     const bands = [];
     let lo = h0;
     for (const y of full) { bands.push([lo, y]); lo = y + t; }
@@ -927,7 +976,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         const own = xs.length ? fixed.filter(f => f.deel === c + 1 && f.y > b0 + 20 && f.y + t < b1 - 20).map(f => f.y).sort((a, b) => a - b) : [];
         for (const y of own) {
           const hp = add({ naam: `Vaste legplank (deel ${c + 1})`, rol: 'liggend', mat: 'korpus', dikte: t, grain: 'u', edges: { v1: S.bandKorpus },
-            box: { x: cx0, y, z: rugFront, w: cx1 - cx0, h: t, d: D - rugFront - frontInset }, uLen: cx1 - cx0, vLen: D - rugFront - frontInset });
+            box: { x: cx0, y, z: rugFront, w: cx1 - cx0, h: t, d: D - rugFront - frontInset - vastTerug }, uLen: cx1 - cx0, vLen: D - rugFront - frontInset - vastTerug });
           join(hp, y + t / 2, false, [left, right]);
           // Vaste legplanken aan beide kanten van een stijl op dezelfde hoogte: de deuvelgaten zouden elkaar raken.
           const nb = fixed.filter(f => (f.deel === c || f.deel === c + 2) && Math.abs(f.y - y) < t + 10);
@@ -974,7 +1023,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     let fy1 = k.front === 'inliggend' ? z.open1 - v / 2 : zoneTop - v / 2;
     // Fronten laten uitsteken: de onderste naar onder (bv. over de plint), de bovenste naar boven.
     if (k.front !== 'inliggend') {
-      if (z.index === 0) fy0 -= Number(k.uitstekOnder) || 0;
+      if (z.index === 0) fy0 -= Number(k.uitstekOnder) || (hangGreeploos ? S.hangGreepUitsteek : 0);
       if (z.index === zones.length - 1) fy1 += Number(k.uitstekBoven) || 0;
     }
 
@@ -1073,14 +1122,15 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
             count('Montageplaat');
           }
           handleHoles(door, true, hingeLeft ? false : true);
-          // Dempers: twee gaten aan de openingskant, bij de boven- en onderhoek.
-          if (S.dempers) {
+          // Dempers: twee gaten aan de openingskant, bij de boven- en onderhoek (niet bij push-open: dan drukt de deur niet in).
+          if (S.dempers && k.greep !== 'push') {
             const du = hingeLeft ? door.uLen - S.demperRand : S.demperRand;
             // Binnen de hoogte van de zijwand blijven (ook als de deur uitsteekt).
             const lo = Math.max(S.demperRand, -Pv - door.box.y + S.demperRand), hi = Math.min((door.shape ? door.shape[3][1] + (door.shape[2][1] - door.shape[3][1]) * du / door.uLen - 6 : door.vLen) - S.demperRand, H - door.box.y - S.demperRand);
             for (const dv of [lo, hi]) door.ops.push({ kind: 'boring', face: 'binnen', u: du, v: dv, dia: S.demperDia, diepte: S.demperDiepte, naam: 'Demper' });
             count('Demper', 2);
           }
+          if (k.greep === 'push') pushBore(door, !hingeLeft, n);
           if (k.greep === 'tipon') {
             const freeSide = hingeLeft ? sideR : sideL;
             if (n === 1) {
@@ -1118,10 +1168,11 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         const f = front({ naam: n === 1 ? 'Ladefront' : `Ladefront ${i + 1}`, x0: frontX0, y0: yy, x1: frontX1, y1: top });
         handleHoles(f, false);
         // Dempers: links en rechts op halve hoogte, ter hoogte van de zijwanden.
-        if (S.dempers) {
+        if (S.dempers && k.greep !== 'push') {
           for (const du of [S.demperRand, f.uLen - S.demperRand]) f.ops.push({ kind: 'boring', face: 'binnen', u: du, v: f.vLen / 2, dia: S.demperDia, diepte: S.demperDiepte, naam: 'Demper' });
           count('Demper', 2);
         }
+        if (k.greep === 'push') pushBore(f, true, 1, true);
         if (greeplijst) addGreeplijst(i === n - 1 ? 'L' : 'C', top - t, i === n - 1 ? 'boven' : `lade ${i + 1}`);
         // Ladekast
         const openBottom = i === 0 ? z.open0 : greeplijst ? yy + t : yy - v / 2;
@@ -1221,28 +1272,149 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const pw = Number(k.paslat?.[kant]) || 0;
     if (pw <= 0) continue;
     if (pw < t) { warnings.push(`Paslat ${kant}: minstens ${t} mm breed.`); continue; }
+    if (punt && (kant === 'links') === rechtsHoog) { warnings.push(`Paslat ${kant}: niet mogelijk aan de punt van een spitse kast.`); continue; }
     const left = kant === 'links';
     const sd = left ? sideL : sideR;
     const xf = left ? -v / 2 - pw : W + v / 2;
-    const fp = add({ id: `paslat-front-${kant}`, naam: `Frontpaslat ${kant}`, rol: 'paslat', mat: 'front', dikte: fd, grain: 'v',
-      edges: { u0: left ? 0 : S.bandFront, u1: left ? S.bandFront : 0, v0: S.bandFront, v1: S.bandFront },
-      box: { x: xf, y: fY0, z: D, w: pw, h: fY1 - fY0, d: fd }, uLen: pw, vLen: fY1 - fY0 });
     const kd = Math.min(S.paslatDiepte, Dk);
     const kp = add({ id: `paslat-kast-${kant}`, naam: `Kastpaslat ${kant}`, rol: 'paslat', mat: 'korpus', dikte: t, grain: 'v', edges: {},
       box: { x: left ? -t : W, y: -Pv, z: D - kd, w: t, h: sideH, d: kd }, uLen: kd, vLen: sideH });
+    // Greeploos: de greeplijsten lopen door over de paslat; de frontpaslat wordt daar onderbroken (een stuk per front)
+    // en de kastpaslat krijgt dezelfde uitsparing als de zijwand.
+    const grips = parts.filter(x => x.rol === 'greeplijst' && /staand/.test(x.naam)).map(x => [x.box.y, x.box.y + x.box.h, D - x.box.z]).sort((a2, b2) => a2[0] - b2[0]);
+    const segs = [];
+    let y0 = fY0;
+    for (const [g0, g1] of grips) { if (g0 > y0 + 20 && g0 < fY1) segs.push([y0, Math.min(g0, fY1)]); if (g1 > y0) y0 = g1; }
+    if (fY1 > y0 + 20) segs.push([y0, fY1]);
+    const fps = segs.map(([s0, s1], i) => add({ id: `paslat-front-${kant}${segs.length > 1 ? `-${i + 1}` : ''}`, naam: `Frontpaslat ${kant}${segs.length > 1 ? ` ${i + 1}` : ''}`, rol: 'paslat', mat: 'front', dikte: fd, grain: 'v',
+      edges: { u0: left ? 0 : S.bandFront, u1: left ? S.bandFront : 0, v0: S.bandFront, v1: S.bandFront },
+      box: { x: xf, y: s0, z: D, w: pw, h: s1 - s0, d: fd }, uLen: pw, vLen: s1 - s0 }));
+    for (const [g0, g1, dOut] of grips) kp.ops.push({ kind: 'uitsparing', u: kd - dOut, v: g0 + Pv, w: dOut, h: g1 - g0, naam: 'Uitsparing greeplijst' });
+    // Trapkast: de paslatten lopen mee met de schuinte (de frontpaslat bovenaan schuin gezaagd zoals de deuren;
+    // de kastpaslat nergens hoger dan de schuine lijn).
+    if (lr) {
+      // Bovenste stuk tot tegen de schuine lijn (aan de hoge kant dus hoger dan de deuren), daarna schuin afzagen.
+      const topFp = fps.slice().sort((a, b) => (b.box.y + b.box.h) - (a.box.y + a.box.h))[0];
+      if (topFp) {
+        const want = Math.max(yTopX(topFp.box.x), yTopX(topFp.box.x + topFp.box.w)) - v / 2;
+        if (want > topFp.box.y + topFp.box.h) { topFp.box.h = topFp.vLen = want - topFp.box.y; }
+      }
+      for (const fp of fps) shapeTopLR(fp, x => yTopX(x) - v / 2);
+      const hk = Math.min(yTopX(left ? -t : W + t), yTopX(left ? 0 : W)) + Pv;
+      if (hk < kp.box.h) { kp.box.h = kp.vLen = hk; kp.ops = kp.ops.filter(o => o.v == null || o.v < hk - 20); }
+    }
+    // Plint en greeplijsten even breed maken als kast + paslat.
+    const ext = pw + v / 2;
+    for (const x of parts.filter(x => ['plint', 'trespa', 'greeplijst'].includes(x.rol) && Math.abs(x.box.x) < 0.5 && Math.abs(x.box.w - W) < 0.5)) {
+      if (left) x.box.x -= ext;
+      x.box.w += ext; x.uLen += ext;
+    }
     // Clamex: in de voorkant van de kastpaslat (u1) en in het vlak van de frontpaslat, ter hoogte van de kastpaslat.
     const fu = (left ? -t / 2 : W + t / 2) - xf;
-    for (const c of clamexPositions(sideH, S)) {
-      const fv = kp.box.y + c - fp.box.y;
-      if (fv < 40 || fv > fp.vLen - 40) continue;
+    for (const c of clamexPositions(kp.vLen, S)) {
+      const yc = kp.box.y + c;
+      const fp = fps.find(f => yc > f.box.y + 40 && yc < f.box.y + (f.edgeH ? Math.min(f.edgeH.u0, f.edgeH.u1) : f.box.h) - 40);
+      if (!fp || grips.some(([g0, g1]) => yc > g0 - 30 && yc < g1 + 30)) continue;
       kp.ops.push({ kind: 'clamex', edge: 'u1', pos: c, naam: 'Clamex' });
-      fp.ops.push({ kind: 'clamex', face: 'binnen', u: fu, v: fv, naam: 'Clamex' });
+      fp.ops.push({ kind: 'clamex', face: 'binnen', u: fu, v: yc - fp.box.y, naam: 'Clamex' });
       count('Lamello Clamex P-14');
     }
-    // Schroeven door de zijwand in de kastpaslat.
-    for (const vv of spreadPositions(sideH, S.paslatSchroefAfstand, 80)) {
-      sd.ops.push({ kind: 'boring', face: 'binnen', u: Dk - kd / 2, v: vv, dia: S.schroefDia, diepte: t, doorgaand: true, naam: 'Schroef paslat' });
-      count('Schroef');
+    // Elk stuk frontpaslat minstens één Clamex (kort stuk: in het midden).
+    for (const fp of fps) if (!fp.ops.some(o => o.kind === 'clamex') && fp.vLen > 60) {
+      const yc = fp.box.y + (fp.edgeH ? Math.min(fp.edgeH.u0, fp.edgeH.u1) : fp.vLen) / 2;
+      kp.ops.push({ kind: 'clamex', edge: 'u1', pos: yc - kp.box.y, naam: 'Clamex' });
+      fp.ops.push({ kind: 'clamex', face: 'binnen', u: fu, v: yc - fp.box.y, naam: 'Clamex' });
+      count('Lamello Clamex P-14');
+    }
+    // De kastpaslat wordt van buitenaf vastgeschroefd: geen schroefgaten in de zijwand.
+  }
+
+  // Uitsparing achteraan in een hoek over de volle hoogte (rond een koker of kolom): de kast wordt in bovenaanzicht
+  // L-vormig. De zijwand aan die kant wordt korter, liggende panelen krijgen de uitsparing (gefreesd), de rug wordt
+  // smaller en twee binnenwanden sluiten de uitsparing af (A: evenwijdig met de voorkant, B: evenwijdig met de zijkant).
+  const us = k.uitsparing;
+  if (us && (us.hoek === 'links' || us.hoek === 'rechts') && Number(us.breedte) > 0 && Number(us.diepte) > 0) {
+    const L = us.hoek === 'links';
+    const nb = Number(us.breedte), nd = Number(us.diepte);
+    if (nb < t + 30 || nb > W - 2 * t - 100 || nd > D - 150) warnings.push('De uitsparing is te groot of te klein voor deze kast.');
+    else {
+      // Zijwand: korter (begint op nd), bewerkingen in het weggevallen stuk vervallen.
+      const sd = L ? sideL : sideR;
+      const cut = nd - zBack;
+      sd.ops = sd.ops.filter(o => o.u == null ? !(o.kind === 'groef') : o.u >= cut + 10).map(o => o.u != null ? { ...o, u: o.u - cut } : o);
+      sd.box.z = nd; sd.box.d = D - nd; sd.uLen = D - nd;
+      if (sd.shape) sd.shape = null;
+      // Binnenwanden tussen bodem en top.
+      const y0 = bounds[0].hi, y1 = bounds[bounds.length - 1].lo;
+      const xB = L ? nb : W - nb - t;                        // wand B (evenwijdig met de zijkant)
+      const wA = add({ naam: 'Binnenwand uitsparing (voor)', rol: 'binnenwand', mat: 'korpus', dikte: t, grain: 'v', edges: {},
+        box: { x: L ? t : W - nb - t, y: y0, z: nd, w: nb, h: y1 - y0, d: t }, uLen: nb, vLen: y1 - y0 });
+      const wB = add({ naam: 'Binnenwand uitsparing (zij)', rol: 'stijl', mat: 'korpus', dikte: t, grain: 'v', edges: {},
+        box: { x: xB, y: y0, z: zBack, w: t, h: y1 - y0, d: nd - zBack }, uLen: nd - zBack, vLen: y1 - y0 });
+      // Liggende panelen: uitsparing. Bodem en top (waar de wanden op/onder staan): de uitsparing zelf; de panelen
+      // ertussen ook rond de wanden; losse legplanken nog 2 mm speling.
+      const xn0 = L ? 0 : W - nb, xn1 = L ? nb : W;          // uitsparing in x (kast)
+      for (const hp of parts.filter(x => ['liggend', 'legplank', 'schuin'].includes(x.rol) && !x.tilt)) {
+        const cap = hp.box.y + hp.box.h <= y0 + 0.5 || hp.box.y >= y1 - 0.5;
+        const extra = cap ? 0 : t + (hp.rol === 'legplank' ? 2 : 0);
+        const ax0 = L ? xn0 : xn0 - extra, ax1 = L ? xn1 + extra : xn1, az1 = nd + extra;
+        const u0 = Math.max(0, ax0 - hp.box.x), u1 = Math.min(hp.uLen, ax1 - hp.box.x), vv = az1 - hp.box.z;
+        if (u1 <= u0 || vv <= 0 || hp.box.z >= az1) continue;
+        if (vv >= hp.vLen - 20) {
+          // Het paneel ligt helemaal binnen de diepte van de uitsparing (bv. de achterregel): korter maken tot aan wand B.
+          const nx0 = L ? Math.max(hp.box.x, ax1) : hp.box.x, nx1 = L ? hp.box.x + hp.box.w : Math.min(hp.box.x + hp.box.w, ax0);
+          if (nx1 - nx0 < 30) { warnings.push(`${hp.naam} valt helemaal in de uitsparing.`); continue; }
+          const delta = nx0 - hp.box.x, edgeSide = L ? 'u0' : 'u1';
+          hp.ops = hp.ops.filter(o => o.edge !== edgeSide).map(o => {
+            if (o.edge === 'v0' || o.edge === 'v1') return { ...o, pos: o.pos - delta };
+            return o.u != null ? { ...o, u: o.u - delta } : o;
+          }).filter(o => (o.u == null || (o.u >= 0 && o.u <= nx1 - nx0)) && (o.pos == null || o.edge === 'u0' || o.edge === 'u1' || (o.pos >= 0 && o.pos <= nx1 - nx0)));
+          hp.box.x = nx0; hp.box.w = hp.uLen = nx1 - nx0;
+          continue;
+        }
+        // Verbindingen in het weggevallen stuk vervallen (kant aan de kant van de uitsparing, achteraan).
+        const edgeSide = L ? 'u0' : 'u1';
+        hp.ops = hp.ops.filter(o => !(o.edge === edgeSide && o.pos < vv + 10));
+        hp.ops = hp.ops.filter(o => o.u == null || o.edge || !(o.u > u0 - 5 && o.u < u1 + 5 && o.v < vv + 5));
+        hp.ops.push({ kind: 'uitsparing', u: u0, v: 0, w: u1 - u0, h: vv, naam: 'Uitsparing (koker)' });
+        const W2 = hp.uLen, D2 = hp.vLen;
+        hp.shape3d = { plane: 'xz', pts: L ? [[u1, 0], [W2, 0], [W2, D2], [0, D2], [0, vv], [u1, vv]] : [[0, 0], [u0, 0], [u0, vv], [W2, vv], [W2, D2], [0, D2]] };
+      }
+      // Wanden vast aan bodem en top met deuvels in de kopse kanten.
+      const fix = (wall, alongX) => {
+        for (const [yEdge, edge, faceP] of [[y0, 'v0', 'boven'], [y1, 'v1', 'onder']]) {
+          const cx = wall.box.x + wall.box.w / 2, cz = wall.box.z + wall.box.d / 2;
+          const hp = parts.find(q => (q.rol === 'liggend' || q.rol === 'schuin') && Math.abs((faceP === 'boven' ? q.box.y + q.box.h : q.box.y) - yEdge) < 0.5
+            && q.box.x <= cx && q.box.x + q.box.w >= cx && q.box.z <= cz && q.box.z + q.box.d >= cz);
+          if (!hp) continue;
+          const len = alongX ? wall.box.w : wall.box.d;
+          const dws = len > 2 * S.deuvelEersteVoor + 10 ? [S.deuvelEersteVoor, len - S.deuvelEersteVoor] : [len / 2];
+          for (const d of dws) {
+            const wx = alongX ? wall.box.x + d : cx, wz = alongX ? cz : wall.box.z + d;
+            wall.ops.push({ kind: 'boring', edge, pos: d, dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
+            hp.ops.push({ kind: 'boring', face: faceP, u: wx - hp.box.x, v: wz - hp.box.z, dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
+            count(`Deuvel ${S.deuvelDia} × ${S.deuvelLengte}`);
+          }
+          // Schroef tussen de deuvels, door de bodem/top in de wand.
+          if (S.schroeven && dws.length > 1) for (const d of screwsFromFront(len, dws, S)) {
+            const wx = alongX ? wall.box.x + d : cx, wz = alongX ? cz : wall.box.z + d;
+            hp.ops.push({ kind: 'boring', face: faceP, u: wx - hp.box.x, v: wz - hp.box.z, dia: S.schroefDia, diepte: hp.dikte, doorgaand: true, naam: 'Schroef' });
+            count('Schroef');
+          }
+        }
+      };
+      fix(wA, true); fix(wB, false);
+      // Rug: alleen nog tussen wand B en de andere zijwand; aan de kant van wand B in een groef in wand B (zoals in een zijwand).
+      if (groef) wB.ops.push({ kind: 'groef', face: L ? 'rechts' : 'links', u1: S.rugInsprong + gw / 2, v1: 0, u2: S.rugInsprong + gw / 2, v2: wB.vLen, breedte: gw, diepte: gd, naam: 'Rugwandgroef' });
+      for (const rug of parts.filter(x => x.rol === 'rug' && x.mat === 'rug')) {
+        const oldX = rug.box.x, inGroef = groef ? gd - gs : 0;
+        if (L) { const x1 = rug.box.x + rug.box.w; rug.box.x = xB + t - inGroef; rug.box.w = rug.uLen = x1 - rug.box.x; }
+        else { rug.box.w = rug.uLen = xB + inGroef - rug.box.x; }
+        const shift = rug.box.x - oldX;
+        rug.ops = rug.ops.map(o => (o.u != null ? { ...o, u: o.u - shift } : o)).filter(o => o.u == null || (o.u >= 5 && o.u <= rug.uLen - 5));
+        if (rug.shape) rug.shape = null;
+      }
+      warnings.push(`Uitsparing ${us.hoek} achteraan (${nb} × ${nd} mm, volle hoogte): binnenwanden sluiten de kast af; de hoek van de uitsparing in bodem en top wordt gefreesd (straal van de frees).`);
     }
   }
 
@@ -1252,6 +1424,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       for (const hp of parts.filter(x => x.rol === 'liggend' && Math.abs(x.box.z - (rug.box.z + rug.box.d)) < 1.5
         && x.box.y >= rug.box.y - 0.1 && x.box.y + x.box.h <= rug.box.y + rug.box.h + 0.1)) {
         for (const u of spreadPositions(hp.box.w, S.rugSchroefAfstand, Math.min(50, hp.box.w / 4))) {
+          if (hp.box.x + u - rug.box.x < 15 || hp.box.x + u - rug.box.x > rug.uLen - 15) continue;
           rug.ops.push({ kind: 'boring', face: 'achter', u: hp.box.x + u - rug.box.x, v: hp.box.y + hp.box.h / 2 - rug.box.y, dia: S.schroefDia, diepte: S.rug, doorgaand: true, naam: 'Schroef' });
           count('Schroef');
         }
@@ -1279,7 +1452,11 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       top.box.y = 0; top.box.h = yHigh;
       top.shape3d = { plane: 'xy', pts: tipRight ? [[t, yi], [xi, t], [W, 0], [0, yHigh]] : [[xi, t], [W - t, yi], [W, yHigh], [0, 0]] };
     }
-    if (bodem && top) for (const c of clamexPositions(bodem.vLen, S)) {
+    if (bodem && top && deg / 2 < S.clamexMinHoek) {
+      // Te scherp voor de Clamex-macro: het verstek zagen met de gekantelde zaag en verlijmen.
+      for (const q of [bodem, top]) q.ops.push({ kind: 'verstek', edge: tipEdge, hoek: r1(deg / 2), naam: 'Verstek zagen (A-hoek)' });
+      warnings.push(`De punt (${r1(deg / 2)}° per stuk) is te scherp voor Clamex (minimaal ${S.clamexMinHoek}°): bodem en top worden daar in verstek gezaagd met de gekantelde zaag en verlijmd.`);
+    } else if (bodem && top) for (const c of clamexPositions(bodem.vLen, S)) {
       bodem.ops.push({ kind: 'clamex', edge: tipEdge, pos: bodem.vLen - c, hoek: r1(deg / 2), naam: 'Clamex (verstek punt)' });
       top.ops.push({ kind: 'clamex', edge: tipEdge, pos: top.vLen - c, hoek: r1(deg / 2), naam: 'Clamex (verstek punt)' });
       count('Lamello Clamex P-14');
@@ -1405,6 +1582,220 @@ function projectLayout(project) {
     const num = (v, d) => (v === null || v === undefined || v === '' ? d : Number(v));
     return { x: num(k.posX, auto.x), y: num(k.posY, auto.y), z: num(k.posZ, 0), rot: Number(k.rot) || 0, auto };
   });
+}
+
+/**
+ * Onderdelen van alle kasten in een project, met plinten en greeplijsten doorlopend over kasten die tegen elkaar
+ * staan (zelfde draaiing, zijkant tegen zijkant, voorkant op één lijn, zelfde hoogte). Het doorlopende stuk hoort bij
+ * de eerste kast van de rij; bij de andere kasten valt het weg. Te lange stukken worden op een kastnaad verdeeld.
+ * Geeft [{ k, res, parts }] (parts = onderdelen na samenvoegen; res.parts blijft ongewijzigd).
+ */
+function projectParts(project, S, maxLen = 2780) {
+  const layout = projectLayout(project);
+  const items = project.kasten.map((k, i) => {
+    const res = buildCabinet(k, S);
+    return { k, res, L: layout[i], parts: res.error ? [] : res.parts.slice() };
+  });
+  if (project.koppelen === false) return items;
+  const ok = items.filter(it => !it.res.error);
+  // Rechterbuur: in het assenstelsel van de kast ligt de buur op x = breedte, met de voorkant op dezelfde lijn.
+  const rightOf = a => ok.find(b => {
+    if (b === a || ((Number(b.L.rot) - Number(a.L.rot)) % 360 + 360) % 360 !== 0 || Math.abs(b.L.y - a.L.y) > 1) return false;
+    const r = -(Number(a.L.rot) || 0) * Math.PI / 180, dx = b.L.x - a.L.x, dz = b.L.z - a.L.z;
+    const lx = dx * Math.cos(r) - dz * Math.sin(r), lz = dx * Math.sin(r) + dz * Math.cos(r);
+    return Math.abs(lx - Number(a.k.breedte)) < 2 && Math.abs(lz + Number(b.k.diepte) - Number(a.k.diepte)) < 2;
+  });
+  const keyOf = p => `${p.rol}|${p.naam.replace(/^Greeplijst [^,]+,/, 'G,')}|${Math.round(p.box.y)}|${Math.round(p.box.h)}|${Math.round(p.box.z)}|${Math.round(p.box.d)}|${p.decor}|${p.dikte}`;
+  const kind = p => p.rol === 'plint' || p.rol === 'greeplijst' || p.rol === 'trespa';
+  const W = it => Number(it.k.breedte);
+  const hasLeft = new Set(ok.map(rightOf).filter(Boolean));
+  for (const start of ok.filter(it => !hasLeft.has(it))) {
+    // Rij van kasten vanaf de meest linkse.
+    const row = [start];
+    for (let n = rightOf(start); n && !row.includes(n); n = rightOf(n)) row.push(n);
+    if (row.length < 2) continue;
+    const keys = new Set(row.flatMap(it => it.parts.filter(kind).map(keyOf)));
+    for (const key of keys) {
+      // Ketting: het stuk loopt tot de rechterkant van de kast en het volgende begint aan de linkerkant.
+      let chain = [];
+      const flush = () => {
+        if (chain.length >= 2) {
+          let group = [];
+          const emit = () => {
+            if (group.length > 1) {
+              const len = group.reduce((t, c) => t + c.p.uLen, 0);
+              const first = group[0];
+              const merged = { ...first.p, id: `${first.p.id}-doorlopend`, naam: `${first.p.naam} (doorlopend)`, uLen: len, box: { ...first.p.box, w: len },
+                kastLabel: `${group[0].it.k.code}–${group[group.length - 1].it.k.code}`, doorlopend: group.map(c => c.it.k.code) };
+              first.it.parts[first.it.parts.indexOf(first.p)] = merged;
+              for (const c of group.slice(1)) c.it.parts.splice(c.it.parts.indexOf(c.p), 1);
+            }
+            group = [];
+          };
+          // Op een kastnaad verdelen als het stuk te lang wordt voor een plaat.
+          for (const c of chain) {
+            if (group.length && group.reduce((t, g) => t + g.p.uLen, 0) + c.p.uLen > maxLen) emit();
+            group.push(c);
+          }
+          emit();
+        }
+        chain = [];
+      };
+      for (const it of row) {
+        const q = it.parts.find(p => kind(p) && keyOf(p) === key);
+        const last = chain[chain.length - 1];
+        const links = q && last && Math.abs(q.box.x) < 0.5 && Math.abs(last.p.box.x + last.p.box.w - W(last.it)) < 0.5;
+        if (links) chain.push({ it, p: q });
+        else { flush(); if (q) chain = [{ it, p: q }]; }
+      }
+      flush();
+    }
+  }
+  return items;
+}
+
+/**
+ * Afwerkpaneel in het project (wereldcoördinaten): as = richting van de dikte ('x', 'y' of 'z'), vlak = coördinaat
+ * van het vlak waartegen het paneel ligt, zin = +1/-1 (naar welke kant de dikte gaat), en de rechthoek in de andere
+ * twee assen (a0..a1, b0..b1). Geeft een onderdeel zoals bij een kast.
+ */
+function panelPart(pn, S) {
+  const d = Number(pn.dikte) || S.front;
+  const ax = pn.as, other = ax === 'x' ? ['y', 'z'] : ax === 'y' ? ['x', 'z'] : ['x', 'y'];
+  const lo = pn.zin > 0 ? pn.vlak : pn.vlak - d;
+  const box = { x: 0, y: 0, z: 0, w: 0, h: 0, d: 0 };
+  const size = { x: 'w', y: 'h', z: 'd' };
+  box[ax] = lo; box[size[ax]] = d;
+  box[other[0]] = Math.min(pn.a0, pn.a1); box[size[other[0]]] = Math.abs(pn.a1 - pn.a0);
+  box[other[1]] = Math.min(pn.b0, pn.b1); box[size[other[1]]] = Math.abs(pn.b1 - pn.b0);
+  const e1 = Math.abs(pn.a1 - pn.a0), e2 = Math.abs(pn.b1 - pn.b0);
+  // Nerf: bij een staand paneel in de hoogte, bij een liggend paneel in de langste richting.
+  const vertical = ax !== 'y';
+  const len = vertical ? box.h : Math.max(e1, e2), wid = vertical ? (ax === 'x' ? box.d : box.w) : Math.min(e1, e2);
+  const band = pn.band ?? S.bandFront;
+  return {
+    id: pn.id, naam: pn.naam || 'Afwerkpaneel', rol: 'afwerk', mat: pn.mat === 'korpus' ? 'korpus' : 'front', dikte: d, grain: 'v', box,
+    uLen: wid, vLen: len, edges: { u0: band, u1: band, v0: band, v1: band }, ops: [],
+    decor: pn.decor || (pn.mat === 'korpus' ? S.decorKorpus : S.decorFront),
+    plaattype: pn.plaattype || (pn.mat === 'korpus' ? 'Melamine' : (S.frontMateriaal || 'Melamine')),
+    kastLabel: 'Afwerking',
+  };
+}
+function panelPartFull(pn, S) {
+  const p = panelPart(pn, S);
+  p.edgeDecor = { u0: p.decor, u1: p.decor, v0: p.decor, v1: p.decor };
+  const d = (S.decors ?? []).find(x => x.code === p.decor);
+  if (d?.kleur) p.kleur = d.kleur;
+  return p;
+}
+
+/**
+ * Ruimte van het project (optioneel): wanden als lijn vanaf (0, 0) langs X (de achterwand), elke volgende wand
+ * gedraaid met 180° − hoek naar de ruimte toe; plus obstakels (koker, kolom) als blokken. Geeft onderdelen voor 3D
+ * en de wandlijnen (voor vastklikken).
+ */
+function roomGeometry(project) {
+  const parts = [], lines = [];
+  const r = project.ruimte;
+  const H = Number(r?.hoogte) || 2600;
+  if (r?.wanden?.length) {
+    let x = 0, z = 0, dx = 1, dz = 0;
+    r.wanden.forEach((wd, i) => {
+      const len = Number(wd.lengte) || 0;
+      if (len <= 0) return;
+      const ex = x + dx * len, ez = z + dz * len;
+      lines.push({ x0: x, z0: z, x1: ex, z1: ez });
+      // Muur buiten de ruimte (100 mm dik), als vorm in het vlak X/Z.
+      const nx = dz, nz = -dx, th = 100;
+      const pts = [[x, z], [ex, ez], [ex + nx * th, ez + nz * th], [x + nx * th, z + nz * th]];
+      const bx0 = Math.min(...pts.map(q => q[0])), bz0 = Math.min(...pts.map(q => q[1]));
+      const bx1 = Math.max(...pts.map(q => q[0])), bz1 = Math.max(...pts.map(q => q[1]));
+      parts.push({ id: `muur-${i}`, naam: `Wand ${i + 1}`, rol: 'muur', mat: 'muur', kleur: '#d9d6cf', ops: [], edges: {}, uLen: len, vLen: H, dikte: th,
+        box: { x: bx0, y: 0, z: bz0, w: bx1 - bx0, h: H, d: bz1 - bz0 }, shape3d: { plane: 'xz', pts: pts.map(([px, pz]) => [px - bx0, pz - bz0]) } });
+      x = ex; z = ez;
+      const a = (180 - (Number(wd.hoek) || 90)) * Math.PI / 180;
+      [dx, dz] = [dx * Math.cos(a) - dz * Math.sin(a), dx * Math.sin(a) + dz * Math.cos(a)];
+    });
+  }
+  for (const o of project.obstakels ?? []) {
+    const b = Number(o.breedte) || 0, d = Number(o.diepte) || 0, h = Number(o.hoogte) || H;
+    if (b <= 0 || d <= 0) continue;
+    parts.push({ id: o.id, naam: o.naam || 'Obstakel', rol: 'obstakel', mat: 'muur', kleur: '#b9b4aa', ops: [], edges: {}, uLen: b, vLen: h, dikte: d,
+      box: { x: Number(o.x) || 0, y: Number(o.y) || 0, z: Number(o.z) || 0, w: b, h, d } });
+  }
+  return { parts, lines };
+}
+
+/**
+ * Uitsparingen uit obstakels: een kast waarvan de achterhoek in een obstakel staat, krijgt automatisch een uitsparing
+ * over de volle hoogte met de maat van de overlapping. Een zelf ingegeven uitsparing blijft staan. Geeft true als er iets
+ * veranderde.
+ */
+function applyObstacles(project) {
+  let changed = false;
+  const layout = projectLayout(project);
+  project.kasten.forEach((k, i) => {
+    const L = layout[i], W = Number(k.breedte), D = Number(k.diepte);
+    if (!(W > 0 && D > 0) || (k.uitsparing && !k.uitsparing.auto)) return;
+    let best = null;
+    for (const o of project.obstakels ?? []) {
+      // Hoeken van het obstakel in het assenstelsel van de kast.
+      const a = (Number(L.rot) || 0) * Math.PI / 180;
+      const loc = [[o.x, o.z], [o.x + o.breedte, o.z], [o.x, o.z + o.diepte], [o.x + o.breedte, o.z + o.diepte]].map(([x, z]) => {
+        const dx = x - L.x, dz = z - L.z;
+        return [dx * Math.cos(a) + dz * Math.sin(a), -dx * Math.sin(a) + dz * Math.cos(a)];   // wereld → kast
+      });
+      const x0 = Math.max(0, Math.min(...loc.map(q => q[0]))), x1 = Math.min(W, Math.max(...loc.map(q => q[0])));
+      const z0 = Math.max(0, Math.min(...loc.map(q => q[1]))), z1 = Math.min(D, Math.max(...loc.map(q => q[1])));
+      if (x1 - x0 < 1 || z1 - z0 < 1 || z0 > 1) continue;    // geen overlapping, of niet tegen de achterkant
+      if (x0 < 1) best = { hoek: 'links', breedte: Math.round(x1), diepte: Math.round(z1), auto: true };
+      else if (x1 > W - 1) best = { hoek: 'rechts', breedte: Math.round(W - x0), diepte: Math.round(z1), auto: true };
+    }
+    const prev = JSON.stringify(k.uitsparing ?? null), next = JSON.stringify(best);
+    if (prev !== next) { k.uitsparing = best; changed = true; }
+  });
+  return changed;
+}
+
+// MARK: - Projectstandaarden
+/** Velden die een projectstandaard kunnen volgen (tenzij ze bij de kast zelf gekozen zijn: k.eigen). */
+const STD_KEYS = ['hoogte', 'diepte', 'plintHoogte', 'decorKorpus', 'decorFront', 'frontMateriaal', 'bandKorpusDecor',
+  'greep', 'greepHart', 'serie', 'plaatDikte', 'rug', 'plint', 'plintTrespa'];
+
+/** Soort kast voor de standaardmaten: onder, boven (hangkast) of kolom. */
+function cabGroup(k) {
+  const g = PRESETS.find(x => x.id === k.type)?.groep;
+  return g === 'Bovenkasten' ? 'boven' : g === 'Kolomkasten' ? 'kolom' : 'onder';
+}
+
+/** Waarde van de projectstandaard voor een veld van deze kast (undefined = geen standaard). */
+function stdValueFor(project, k, key) {
+  const st = project.standaard ?? {};
+  const g = cabGroup(k);
+  let v;
+  if (key === 'hoogte') v = st[`${g}Hoogte`];
+  else if (key === 'diepte') v = st[`${g}Diepte`];
+  else if (key === 'plintHoogte') v = g === 'boven' ? undefined : st.plintHoogte;
+  else if (key === 'plint' && g === 'boven') v = undefined;
+  else v = st[key];
+  return v === null || v === '' ? undefined : v;
+}
+
+/** Projectstandaard toepassen op één of alle kasten (velden in k.eigen blijven). Geeft true als er iets veranderde. */
+function applyStandard(project, only = null) {
+  let changed = false;
+  for (const k of only ? [only] : project.kasten) {
+    const eigen = new Set(k.eigen ?? []);
+    for (const key of STD_KEYS) {
+      if (eigen.has(key)) continue;
+      const v = stdValueFor(project, k, key);
+      if (v === undefined) continue;
+      if (key === 'serie') {
+        for (const s of k.secties ?? []) if (s.type === 'lade' && s.serie !== v) { s.serie = v; s.ladeType = ''; changed = true; }
+      } else if (k[key] !== v) { k[key] = v; changed = true; }
+    }
+  }
+  return changed;
 }
 
 /** Standaard plaattype: fronten (en plint) zoals gekozen bij de kast, de rest melamine. */

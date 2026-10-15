@@ -53,6 +53,7 @@ const P110_TOOLS = [
   { nr: '1005', naam: 'Verticale boor Ø8', soort: 'boorV', dia: 8, lengte: 30 },
   { nr: '1006', naam: 'Verticale boor Ø35', soort: 'boorV', dia: 35, lengte: 15 },
   ...['1007', '1008', '1009', '1010', '1011', '1012'].map(nr => ({ nr, naam: 'Verticale boor Ø5', soort: 'boorV', dia: 5, lengte: 30 })),
+  { nr: '160', naam: 'Boor Ø10 (push-open drevel), alle richtingen', soort: 'boorH', dia: 10, lengte: 90 },
   { nr: '1111', naam: 'Horizontale boor Ø8 X+', soort: 'boorH', dia: 8, lengte: 40, richting: 'XP' },
   { nr: '1113', naam: 'Horizontale boor Ø8 X+', soort: 'boorH', dia: 8, lengte: 40, richting: 'XP' },
   { nr: '1112', naam: 'Horizontale boor Ø8 X−', soort: 'boorH', dia: 8, lengte: 40, richting: 'XM' },
@@ -67,7 +68,7 @@ function checkDrill(tools, { dia, diepte, horizontaal, richting, door }) {
   if (horizontaal) {
     const fit = tools.filter(t => t.soort === 'boorH' && near(t));
     if (!fit.length) return `horizontale boring Ø${dia}: geen horizontale boor met die diameter`;
-    if (richting && !fit.some(t => t.richting === richting)) return `horizontale boring Ø${dia} in richting ${richting}: geen boor in die richting`;
+    if (richting && !fit.some(t => !t.richting || t.richting === richting)) return `horizontale boring Ø${dia} in richting ${richting}: geen boor in die richting`;
     if (Math.max(...fit.map(t => t.lengte)) < diepte) return `horizontale boring Ø${dia} × ${diepte}: boor te kort (${Math.max(...fit.map(t => t.lengte))} mm)`;
     return null;
   }
@@ -163,7 +164,7 @@ const CLAMEX_SAW = [
 "VA=\"measure 0\"",
 "VA=\"Drill 0\"",
 "VA=\"DrillUni 0\"",
-"VA=\"Saw 1\"",
+"VA=\"Saw {SAW}\"",
 "VA=\"Comment 1\"",
 "VA=\"ComTurn 0\"",
 "VA=\"LINE3 0000000000000000\"",
@@ -225,7 +226,7 @@ const CLAMEX_SAW = [
 "KO=\"00\""
 ];
 function clamexBlock(tpl, vals) {
-  return tpl.map(l => l.replace(/\{(X|Y|Z|A|XY|ANG)\}/g, (_, k) => vals[k] ?? (k === 'ANG' ? '90' : ''))).join('\r\n') + '\r\n';
+  return tpl.map(l => l.replace(/\{(X|Y|Z|A|XY|ANG|SAW)\}/g, (_, k) => vals[k] ?? (k === 'ANG' ? '90' : k === 'SAW' ? '1' : ''))).join('\r\n') + '\r\n';
 }
 
 const f3 = n => String(Math.round(Number(n) * 1000) / 1000);
@@ -286,6 +287,7 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
   const skipped = [];
   const sides = { A: [], B: [] };
   const contours = [];
+  const mitreSawn = new Set();
 
   // Zijde B: gespiegeld in Y (paneel om de X-as gekeerd).
   const mapB = fr.mapB ?? ((u, v) => { const [x, y] = fr.map(u, v); return [x, fr.B - y]; });
@@ -298,12 +300,21 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
         const pt = op.edge === 'u0' ? [0, op.pos] : op.edge === 'u1' ? [p.uLen, op.pos] : op.edge === 'v0' ? [op.pos, 0] : [op.pos, p.vLen];
         const [x, y] = fr.map(pt[0], pt[1]);
         const xy = Math.abs(x) < 0.01 ? 270 : Math.abs(x - fr.L) < 0.01 ? 90 : Math.abs(y) < 0.01 ? 0 : 180;
-        sides.A.push(clamexBlock(CLAMEX_SAW, { X: f3(x), Y: f3(y), A: f3(D / 2), XY: xy, ANG: f3(op.hoek ?? 90) }));
+        // Verstek: alleen bij de eerste Clamex van elke verbinding (kant) zaagt de macro ook het verstek.
+        let saw = '1';
+        if (op.hoek != null) { saw = mitreSawn.has(op.edge) ? '0' : '1'; mitreSawn.add(op.edge); }
+        sides.A.push(clamexBlock(CLAMEX_SAW, { X: f3(x), Y: f3(y), A: f3(D / 2), XY: xy, ANG: f3(op.hoek ?? 90), SAW: saw }));
       } else {
         // In het vlak: frees 202 (Lamello_router), zoals in de bestanden met XY_Angle 270.
         const onB = op.face === fr.down;
-        const [x, y] = (onB ? mapB : fr.map)(op.u, op.v);
-        (onB ? sides.B : sides.A).push(clamexBlock(CLAMEX_ROUTER, { X: f3(x), Y: f3(y), Z: f3(D), XY: 270 }));
+        const mp = onB ? mapB : fr.map;
+        const [x, y] = mp(op.u, op.v);
+        // Richting van de verbinding (standaard: langs de diepte, achter → voor = XY_Angle 270); bij een schuine
+        // verbinding draait de Clamex mee.
+        const [du, dv] = op.dir ?? [1, 0];
+        const [x2, y2] = mp(op.u + du * 10, op.v + dv * 10);
+        const xy = op.dir ? Math.round(((Math.atan2(y2 - y, x2 - x) * 180 / Math.PI) + 360) % 360 * 1000) / 1000 : 270;
+        (onB ? sides.B : sides.A).push(clamexBlock(CLAMEX_ROUTER, { X: f3(x), Y: f3(y), Z: f3(D), XY: xy }));
       }
       continue;
     }
@@ -330,6 +341,28 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       ].join('\r\n') + '\r\n' + block('<193 \\Kontursaegen\\', {
         EA: `${nr}:0`, MDA: 'SEN', RK: 'NoWRK', TPZ: '0', BL: '0', EE: `${nr}:1`, MDE: 'SEN_AB', RI: '0',
         TNO: M.zaagSchuin ?? '300', SM: '0', S_: 'STANDARD', F_: '5', UZU: '1', F_Z: '0', AB: '0', Z_: '0', ZA: '@0', HP: '0', SP: '0',
+      }));
+      continue;
+    }
+    if (op.kind === 'verstek') {
+      // Verstek zagen met de gekantelde zaag (Nut_R, "Zagen met A-hoek"), zoals in VERSTEK_met_midden_einde:
+      // een snede langs de kant, WI = verstekhoek, op D / tan(hoek) + 10 mm van de kant, 100 mm voorbij beide uiteinden.
+      const e = op.edge;
+      const [pa, pb] = e === 'u0' ? [[0, 0], [0, p.vLen]] : e === 'u1' ? [[p.uLen, 0], [p.uLen, p.vLen]] : e === 'v0' ? [[0, 0], [p.uLen, 0]] : [[0, p.vLen], [p.uLen, p.vLen]];
+      const a = fr.map(...pa), b = fr.map(...pb);
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, dx = (b[0] - a[0]) / len, dy = (b[1] - a[1]) / len;
+      // Normaal naar het midden van het paneel.
+      const mid = fr.map(p.uLen / 2, p.vLen / 2);
+      let nx = -dy, ny = dx;
+      if (nx * (mid[0] - a[0]) + ny * (mid[1] - a[1]) < 0) { nx = -nx; ny = -ny; }
+      const off = D / Math.tan(op.hoek * Math.PI / 180) + 10;
+      const s0 = [a[0] + nx * off - dx * 100, a[1] + ny * off - dy * 100], s1 = [b[0] + nx * off + dx * 100, b[1] + ny * off + dy * 100];
+      // Zaag aan de kant van de rand (afval): links van de looprichting?
+      const left = -dy * (a[0] - s0[0]) + dx * (a[1] - s0[1]) > 0;
+      sides.A.push(block('<124 \\Nut_R\\', {
+        XA: f3(s0[0]), WI: f3(op.hoek), WI2: f3(op.hoek), YA: f3(s0[1]), XE: f3(s1[0]), YE: f3(s1[1]), BL: '0', SK: '1', RK: left ? 'WRKL' : 'WRKR',
+        EM: 'MOD1', MV: 'GL', Z_: '-10', VZ: '3', VT: '0', AB: '0', XY: '0', MN: 'GGL', F_: '5', UZU: '1', ZU: '0', SM: '0', S_: 'STANDARD',
+        ZA: f3(D), ZS: '0', ZSA: '0', HP: '0', SP: '0', KO: '00',
       }));
       continue;
     }
@@ -390,8 +423,10 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
         const s0 = open0 ? -50 : uitloop, s1 = open1 ? len + 50 : len - uitloop;
         if (s1 > s0 + 1) {
           out.push(block('<109 \\Nuten\\', {
-            XA: f3(xa + dx * s0), YA: f3(ya + dy * s0), XE: f3(xa + dx * s1), YE: f3(ya + dy * s1), AN: '0', NB: f3(op.breedte), RK: '0', EM: 'MOD0', TI: f3(op.diepte), MN: 'GL',
-            OP: '1', XY: '100', T_: M.groefTool, F_: 'STANDARD', KO: '00',
+            // Zoals in de P110-programma's: geen frescorrectie (NOWRK), de groef ligt gecentreerd op de lijn,
+            // net als de nafrezing aan een gestopt einde.
+            XA: f3(xa + dx * s0), YA: f3(ya + dy * s0), XE: f3(xa + dx * s1), YE: f3(ya + dy * s1), AN: '0', RK: 'NOWRK', EM: 'MOD0', TI: f3(op.diepte), NB: f3(op.breedte), MN: 'GL',
+            OP: '1', T_: M.groefTool, F_: 'STANDARD', KO: '00',
           }));
         }
         const horiz = Math.abs(dx) > Math.abs(dy);
@@ -432,18 +467,44 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
 }
 
 /** Alle MPR-bestanden van een project als zip, met een overzicht van wat nog manueel moet. */
+/** Kastnummer met twee cijfers (K1 → K01). */
+const mprCode = code => String(code || 'K').replace(/^([A-Za-z]+)(\d)$/, '$10$2');
+
+/** Bestandsnaam van een paneel: kastnummer + onderdeel, bv. K01_stijl_links (zijwand = stijl). */
+function mprPartName(code, p) {
+  const naam = String(p.naam).toLowerCase().replace(/^zijwand/, 'stijl').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[()]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  return `${mprCode(code)}_${naam}`;
+}
+
+/** Namen van de MPR-programma's van een kast (uniek binnen de kast): Map(onderdeel-id → naam). */
+function mprNames(code, parts) {
+  const out = new Map(), used = new Map();
+  for (const p of parts) {
+    if (!p.ops.length && p.rol !== 'zijwand') continue;
+    let n = mprPartName(code, p);
+    const c = (used.get(n) ?? 0) + 1;
+    used.set(n, c);
+    if (c > 1) n = `${n}_${c}`;
+    out.set(p.id, n);
+  }
+  return out;
+}
+
 function projectMprZip(project, S, M) {
   const zip = new ZipWriter();
   const notes = [];
   let count = 0;
+  // Alles in één map met de naam van het project; elk bestand begint met het kastnummer.
+  const dir = safeName(project.naam || 'Project');
   for (const k of project.kasten) {
     const res = buildCabinet(k, S);
     if (res.error) { notes.push(`${k.code}: ${res.error}`); continue; }
+    const names = mprNames(k.code, res.parts);
     for (const p of res.parts) {
-      if (!p.ops.length && p.rol !== 'zijwand') continue;   // panelen zonder bewerking hoeven niet op de CNC
-      const base = safeName(`${k.code}_${p.id}`);
-      const { files, skipped } = mprForPart(p, M, base);
-      for (const f of files) { zip.add(`${safeName(k.code)}/${f.name}`, f.text); count++; }
+      if (!names.has(p.id)) continue;   // panelen zonder bewerking hoeven niet op de CNC
+      const { files, skipped } = mprForPart(p, M, names.get(p.id));
+      for (const f of files) { zip.add(`${dir}/${f.name}`, f.text); count++; }
       if (skipped.length) {
         const n = {};
         for (const s of skipped) n[s] = (n[s] ?? 0) + 1;
@@ -458,7 +519,7 @@ function projectMprZip(project, S, M) {
     `MPR-bestanden voor ${project.naam}`,
     `Gemaakt met de Kasten tool op ${new Date().toLocaleString('nl-BE')}.`,
     '',
-    'Eén bestand per paneel. Zijn er bewerkingen aan twee zijden, dan zijn er twee bestanden: _A (eerst) en _B (paneel gekeerd om de lange kant).',
+    'Eén bestand per paneel, met het kastnummer vooraan (bv. K01_stijl_links). Zijn er bewerkingen aan twee zijden, dan zijn er twee bestanden: _A (eerst) en _B (paneel gekeerd om de lange kant).',
     'Ligging: X langs de lengte (nerf), Y dwars, nulpunt linksvoor, zijde A naar boven.',
     '',
     'Controleer elk programma eerst in de simulatie van woodWOP.',

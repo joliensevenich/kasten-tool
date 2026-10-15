@@ -31,17 +31,16 @@ function nestingItems(project, S, labelOf, kerf = 0) {
   const sets = [];        // [{ key, fronts: [{ label, x (positie in de hoogte), y (positie in de breedte), L, B }] }]
   let current = null;
   let offset = 0;         // positie van de kast in de rij (voor doorlopend met de vorige kast)
-  for (const k of project.kasten) {
-    const res = buildCabinet(k, S);
+  for (const { k, res, parts } of projectParts(project, S)) {
     const W = Number(k.breedte) || 0;
     if (res.error) { offset += W; continue; }
     const mode = k.houtDoorlopend ?? 'nee';
     if (mode !== 'vorige' || !current) current = null;
-    for (const p of sawParts(res.parts, S)) {
+    for (const p of sawParts(parts, S)) {
       const c = cutInfo(p);
       const key = labelOf(p);
       const wood = isWoodDecor(p.decor, S.decors);
-      const label = `${k.code} ${p.naam}`;
+      const label = `${p.kastLabel ?? k.code} ${p.naam}`;
       if (p.rol === 'front' && mode !== 'nee' && wood) {
         if (!current || current.key !== key) { current = { key, fronts: [] }; sets.push(current); }
         // Fronten: nerf langs de hoogte → X van de plaat = hoogte, Y = breedte in de rij.
@@ -52,6 +51,11 @@ function nestingItems(project, S, labelOf, kerf = 0) {
     }
     if (mode === 'nee') current = null;
     offset += W;
+  }
+  for (const pn of project.panelen ?? []) {
+    const p = panelPartFull(pn, S);
+    const c = cutInfo(p);
+    push(labelOf(p), { label: `Afwerking ${p.naam}`, L: c.L, B: c.B, rotate: !isWoodDecor(p.decor, S.decors) });
   }
   sets.forEach((set, i) => {
     // Bij elke overgang tussen twee rijen of kolommen fronten komt er een zaagsnede bij.

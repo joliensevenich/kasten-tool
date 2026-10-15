@@ -19,15 +19,18 @@ function partColor(p) {
 /** Prisma voor een paneel met een vorm (p.shape in u/v), rond het midden van zijn box. */
 function shapeGeometry(p) {
   const b = p.box, c = [b.x + b.w / 2, b.y + b.h / 2, b.z + b.d / 2];
-  const side = p.shape3d ? p.shape3d.plane === 'zy' : (p.rol === 'zijwand' || p.rol === 'stijl');
-  const at = ([u, v], e) => side ? [b.x + e - c[0], b.y + v - c[1], b.z + u - c[2]] : [b.x + u - c[0], b.y + v - c[1], b.z + e - c[2]];
-  const th = side ? b.w : b.d;
+  const plane = p.shape3d ? p.shape3d.plane : (p.rol === 'zijwand' || p.rol === 'stijl') ? 'zy' : 'xy';
+  const at = ([u, v], e) => plane === 'zy' ? [b.x + e - c[0], b.y + v - c[1], b.z + u - c[2]]
+    : plane === 'xz' ? [b.x + u - c[0], b.y + e - c[1], b.z + v - c[2]]
+    : [b.x + u - c[0], b.y + v - c[1], b.z + e - c[2]];
+  const th = plane === 'zy' ? b.w : plane === 'xz' ? b.h : b.d;
   const pts = p.shape3d?.pts ?? p.shape;
   const pos = [];
   const tri = (a, b2, c2) => pos.push(...a, ...b2, ...c2);
-  for (let i = 1; i + 1 < pts.length; i++) {
-    tri(at(pts[0], 0), at(pts[i + 1], 0), at(pts[i], 0));
-    tri(at(pts[0], th), at(pts[i], th), at(pts[i + 1], th));
+  // Boven- en onderkant: driehoeken (ook voor een L-vorm, niet alleen bolle vormen).
+  for (const [i, j, q] of THREE.ShapeUtils.triangulateShape(pts.map(([u, v]) => new THREE.Vector2(u, v)), [])) {
+    tri(at(pts[i], 0), at(pts[q], 0), at(pts[j], 0));
+    tri(at(pts[i], th), at(pts[j], th), at(pts[q], th));
   }
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i], n = pts[(i + 1) % pts.length];
@@ -69,14 +72,49 @@ class Viewer {
     this.controls.dampingFactor = 0.12;
     this.controls.addEventListener('change', () => this.render());
 
-    // Tikken (zonder slepen) kiest een paneel.
+    // Tikken (zonder slepen) kiest een paneel. In de verplaatsmodus sleep je de gekozen kast over de vloer.
     let down = null;
     const canvas = this.renderer.domElement;
-    canvas.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; });
+    canvas.addEventListener('pointerdown', e => {
+      down = { x: e.clientX, y: e.clientY };
+      if (this.moveMode && this.movingCab) {
+        const hit = this.raycast(e);
+        if (hit?.object.userData.cab === this.movingCab) {
+          const holder = this.holders.get(this.movingCab);
+          const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -holder.position.y);
+          const start = this.planePoint(e, plane);
+          if (start) {
+            this.drag = { plane, start, pos: holder.position.clone(), id: e.pointerId };
+            this.controls.enabled = false;
+            try { canvas.setPointerCapture(e.pointerId); } catch { /* geen actieve aanwijzer */ }
+          }
+        }
+      }
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!this.drag) return;
+      const pt = this.planePoint(e, this.drag.plane);
+      if (!pt) return;
+      const x = this.drag.pos.x + pt.x - this.drag.start.x, z = this.drag.pos.z + pt.z - this.drag.start.z;
+      const snapped = this.onDrag?.(this.movingCab, x, z) ?? { x, z };
+      const holder = this.holders.get(this.movingCab);
+      holder.position.x = snapped.x; holder.position.z = snapped.z;
+      this.render();
+    });
+    const endDrag = e => {
+      if (!this.drag) return;
+      try { canvas.releasePointerCapture?.(this.drag.id); } catch { /* al losgelaten */ }
+      this.drag = null;
+      this.controls.enabled = true;
+      down = null;
+      this.onDragEnd?.(this.movingCab);
+    };
     canvas.addEventListener('pointerup', e => {
+      if (this.drag) { endDrag(e); return; }
       if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) this.pick(e);
       down = null;
     });
+    canvas.addEventListener('pointercancel', endDrag);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -102,9 +140,48 @@ class Viewer {
 
   render() { if (!this.disposed) this.renderer.render(this.scene, this.camera); }
 
+  /** Kast verplaatsen zonder alles opnieuw op te bouwen. */
+  setCabinetTransform(key, x, y, z, rot) {
+    const h = this.holders?.get(key);
+    if (!h) return;
+    h.position.set(x, y, z);
+    h.rotation.y = -THREE.MathUtils.degToRad(rot ?? 0);
+    this.render();
+  }
+
+  /** Een hele kast oplichten (verplaatsmodus). */
+  highlightCab(key) {
+    this.movingCab = key;
+    for (const { mesh, cab } of this.items) mesh.material.emissive?.setHex(cab === key ? 0x1d4e89 : 0x000000);
+    this.render();
+  }
+
+  setMoveMode(on) {
+    this.moveMode = on;
+    if (!on) this.highlightCab(null);
+  }
+
+  raycast(e) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(mouse, this.camera);
+    const meshes = this.items.filter(i => i.mesh.visible && !(i.mesh.material.transparent)).map(i => i.mesh);
+    return ray.intersectObjects(meshes, false)[0];
+  }
+
+  planePoint(e, plane) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(mouse, this.camera);
+    return ray.ray.intersectPlane(plane, new THREE.Vector3());
+  }
+
   /** cabinets: [{ key, parts, offsetX }] */
   show(cabinets, { refit = false } = {}) {
     this.cabinets = cabinets;
+    this.holders = new Map();
     for (const item of this.items) {
       item.mesh.geometry.dispose();
       item.mesh.material.dispose();
@@ -120,12 +197,13 @@ class Viewer {
       holder.position.set(cab.offsetX ?? 0, cab.offsetY ?? 0, cab.offsetZ ?? 0);
       holder.rotation.y = -THREE.MathUtils.degToRad(cab.rot ?? 0);
       this.group.add(holder);
+      this.holders.set(cab.key, holder);
       const cabBox = new THREE.Box3();
       for (const p of cab.parts) cabBox.expandByPoint(new THREE.Vector3(p.box.x, p.box.y, p.box.z)).expandByPoint(new THREE.Vector3(p.box.x + p.box.w, p.box.y + p.box.h, p.box.z + p.box.d));
       const center = cabBox.getCenter(new THREE.Vector3());
       for (const p of cab.parts) {
         const geo = p.shape || p.shape3d ? shapeGeometry(p) : new THREE.BoxGeometry(Math.max(p.box.w, 0.5), Math.max(p.box.h, 0.5), Math.max(p.box.d, 0.5));
-        const mat = new THREE.MeshLambertMaterial({ color: partColor(p) });
+        const mat = new THREE.MeshLambertMaterial({ color: partColor(p), side: p.shape || p.shape3d ? THREE.DoubleSide : THREE.FrontSide });
         const mesh = new THREE.Mesh(geo, mat);
         const pos = new THREE.Vector3(p.box.x + p.box.w / 2, p.box.y + p.box.h / 2, p.box.z + p.box.d / 2);
         mesh.userData = { part: p, cab: cab.key, base: pos.clone(), center };
@@ -138,6 +216,7 @@ class Viewer {
       }
     }
     this.applyState();
+    if (this.movingCab) this.highlightCab(this.movingCab);
     this.group.updateMatrixWorld(true);
     for (const { mesh } of this.items) bounds.expandByObject(mesh);
     this.bounds = bounds;
@@ -206,7 +285,13 @@ class Viewer {
     const meshes = this.items.filter(i => i.mesh.visible && !(i.mesh.material.transparent)).map(i => i.mesh);
     const hit = ray.intersectObjects(meshes, false)[0];
     const data = hit?.object.userData;
-    this.onPick?.(data ? { cab: data.cab, part: data.part } : null);
+    // Ook het punt en de richting van het vlak in wereldcoördinaten (voor afwerkpanelen).
+    let point = null, normal = null;
+    if (hit) {
+      point = hit.point.clone();
+      normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : null;
+    }
+    this.onPick?.(data ? { cab: data.cab, part: data.part, point, normal } : null);
   }
 
   dispose() {

@@ -92,6 +92,8 @@ select.picker { -webkit-appearance: none; appearance: none; border: 0; backgroun
 .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.15); transition: transform .2s; }
 .switch input:checked + span { background: var(--green); }
 .switch input:checked + span::after { transform: translateX(20px); }
+#pj-movepanel .mini { width: auto; min-width: 40px; padding: 0 10px; margin-left: 6px; background: var(--accent-soft); }
+#pj-movepanel .mini.on { background: var(--accent); color: #fff; }
 .mini { width: 34px; height: 34px; border-radius: 8px; color: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-size: 15px; flex: none; }
 .mini:disabled { color: var(--text-3); cursor: default; }
 .mini.danger { color: var(--red); }
@@ -121,6 +123,7 @@ select.picker { -webkit-appearance: none; appearance: none; border: 0; backgroun
 .viewer-tools button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 14px; }
 .viewer-tools button.on { background: var(--accent); color: #fff; }
 .split-3d { height: 46vh; min-height: 280px; margin-bottom: 56px; }
+@media (max-width: 899px) { .split-3d:has(#pj-move) { margin-bottom: 104px; } }
 @media (min-width: 900px) {
   .split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
   .split-3d { position: sticky; top: calc(60px + env(safe-area-inset-top)); height: calc(100vh - 190px); margin-bottom: 0; }
