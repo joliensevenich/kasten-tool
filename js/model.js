@@ -826,8 +826,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     if (td) trespa(0, W);
     count('Stelpoot', 4 + (W - 2 * t >= S.pootMiddenVoor ? 1 : 0) + (W - 2 * t >= S.pootMiddenAchter ? 1 : 0));
   } else if (k.plint === 'bak' && P) {
-    // Plintenbak in multiplex: achterlat, zijkanten en tussenlatten om de ~600 mm. Met afwerkplint is die plint de voorkant
-    // van de bak: de latten lopen er tot tegen en de plint klikt erop met Clamex (los te nemen). Zonder afwerkplint een voorlat.
+    // Plintenbak in multiplex: een volledige bak (voorlat, achterlat, zijkanten en tussenlatten om de ~600 mm).
+    // Met afwerkplint lopen de zijkanten en tussenlatten tot tegen de plint en zit de voorlat in stukken tussen de latten;
+    // de plint klikt op de kopse kanten van de latten met Clamex (los te nemen). Zonder afwerkplint een doorlopende voorlat.
     const bt = S.plintBakDikte, afw = k.plintAfwerk !== false;
     const zPl = D - S.plintInsprong - t;                     // achterkant van de afwerkplint
     const zF = afw ? zPl : D - S.plintInsprong - bt;          // voorkant van de latten
@@ -840,13 +841,20 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const rails = [];
     for (let i = 0; i < n; i++) rails.push(lat(i === 0 ? 'Plintenbak zijkant links' : i === n - 1 ? 'Plintenbak zijkant rechts' : 'Plintenbak tussenlat', i * (W - bt) / (n - 1), z0, bt, inner));
     if (afw) {
+      // Voorlat in stukken tussen de latten, gelijk met de voorkant van de latten (achter de plint).
+      for (let i = 0; i + 1 < rails.length; i++) {
+        const xa = rails[i].box.x + bt, xb = rails[i + 1].box.x;
+        if (xb - xa > 1) lat('Plintenbak voorlat', xa, zF - bt, xb - xa, bt);
+      }
+    }
+    if (afw) {
       const pl = add({ id: 'plint', naam: 'Plint (op de bak)', rol: 'plint', mat: 'korpus', dikte: t, grain: 'u', edges: { v1: 0 },
         box: { x: 0, y: -P + td, z: zPl, w: W, h: P - td, d: t }, uLen: W, vLen: P - td });
       // Clamex: in de voorkant van elke lat en in de binnenkant van de plint (op halve hoogte van de plint).
       for (const r of rails) {
         const yc = -P + td + (P - td) / 2;
         r.ops.push({ kind: 'clamex', edge: 'u1', pos: yc + P, naam: 'Clamex (plint)' });
-        pl.ops.push({ kind: 'clamex', face: 'binnen', u: r.box.x + bt / 2, v: yc - pl.box.y, dir: [0, 1], naam: 'Clamex (plint)' });
+        pl.ops.push({ kind: 'clamex', face: 'binnen', u: r.box.x + bt / 2, v: yc - pl.box.y, dir: [0, -1], naam: 'Clamex (plint)' });
         count('Lamello Clamex P-14');
       }
     }
@@ -987,7 +995,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   /**
    * Indeling van een vak: middenstijlen (hart vanaf de linkerbuitenkant), vaste legplanken (vrije hoogte eronder,
    * over alle delen of in één deel) en losse legplanken met systeemboringen per deel.
-   * Een vaste legplank over alle delen loopt door; de stijlen worden erop onderbroken.
+   * De middenstijlen lopen altijd door over het hele vak; een vaste legplank "over alle delen" komt in elk deel apart.
    */
   const divide = (z, s, n) => {
     const h0 = z.open0, h1 = z.open1;
@@ -1006,8 +1014,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       if (!ok) warnings.push(`Een middenstijl op ${r1(x)} mm past niet in de kast.`);
       return ok;
     });
-    // Vaste legplanken over alle delen: doorlopend tussen de zijwanden.
-    const full = fixed.filter(f => !f.deel || !xs.length).map(f => f.y).sort((a, b) => a - b);
+    // Vaste legplanken over alle delen: doorlopend tussen de zijwanden. Met middenstijlen loopt de stijl altijd door
+    // en wordt zo'n legplank in elk deel apart gezet (met Clamex tegen de stijl).
+    const full = xs.length ? [] : fixed.map(f => f.y).sort((a, b) => a - b);
     // Legplanken langer dan legplankDikGrens: legplankDik dik (tegen doorhangen).
     const shelfT = len => (len > S.legplankDikGrens ? S.legplankDik : t);
     full.forEach(y => horizontal({ naam: 'Vaste legplank', y, z: rugFront, d: D - rugFront - frontInset - vastTerug, dikte: shelfT(W - 2 * t) }));
@@ -1075,7 +1084,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       for (let c = 0; c + 1 < walls.length; c++) {
         const left = walls[c].L, right = walls[c + 1].R;
         const cx0 = walls[c].x1, cx1 = walls[c + 1].x0;
-        const own = xs.length ? fixed.filter(f => f.deel === c + 1 && f.y > b0 + 20 && f.y + t < b1 - 20).map(f => f.y).sort((a, b) => a - b) : [];
+        const own = xs.length ? fixed.filter(f => (!f.deel || f.deel === c + 1) && f.y > b0 + 20 && f.y + t < b1 - 20).map(f => f.y).sort((a, b) => a - b) : [];
         for (const y of own) {
           const dkV = shelfT(cx1 - cx0);
           const hp = add({ naam: `Vaste legplank (deel ${c + 1})`, rol: 'liggend', mat: 'korpus', dikte: dkV, grain: 'u', edges: { v1: S.bandKorpus },
