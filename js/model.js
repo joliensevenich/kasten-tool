@@ -826,35 +826,35 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     if (td) trespa(0, W);
     count('Stelpoot', 4 + (W - 2 * t >= S.pootMiddenVoor ? 1 : 0) + (W - 2 * t >= S.pootMiddenAchter ? 1 : 0));
   } else if (k.plint === 'bak' && P) {
-    // Plintenbak in multiplex: een volledige bak (voorlat, achterlat, zijkanten en tussenlatten om de ~600 mm).
-    // Met afwerkplint lopen de zijkanten en tussenlatten tot tegen de plint en zit de voorlat in stukken tussen de latten;
-    // de plint klikt op de kopse kanten van de latten met Clamex (los te nemen). Zonder afwerkplint een doorlopende voorlat.
+    // Plintenbak in multiplex: een volledige, geschroefde bak. Voorlat en achterlat over de volle breedte, zijkanten en
+    // tussenlatten (om de ~600 mm) ertussen, met schroefgaten in voor- en achterlat bij elke lat.
+    // Met afwerkplint komt de plint tegen de voorlat en klikt erop met Clamex (liggend, gefreesd in de plint en in de
+    // voorkant van de voorlat), tussen de latten zodat ze de schroeven niet raken.
     const bt = S.plintBakDikte, afw = k.plintAfwerk !== false;
     const zPl = D - S.plintInsprong - t;                     // achterkant van de afwerkplint
-    const zF = afw ? zPl : D - S.plintInsprong - bt;          // voorkant van de latten
+    const zFL = (afw ? zPl : D - S.plintInsprong) - bt;      // achterkant van de voorlat
     const lat = (naam, x, z, w, d) => add({ naam, rol: 'plintbak', mat: 'korpus', dikte: bt, grain: 'u', edges: {}, decor: 'Multiplex', plaattype: 'Multiplex',
       box: { x, y: -P, z, w, h: P, d }, uLen: Math.max(w, d), vLen: P });
-    if (!afw) lat('Plintenbak voor', 0, zF, W, bt);
-    lat('Plintenbak achter', 0, zBack, W, bt);
-    const z0 = zBack + bt, inner = (afw ? zF : zF) - z0;
+    const voorlat = lat('Plintenbak voor', 0, zFL, W, bt);
+    const achterlat = lat('Plintenbak achter', 0, zBack, W, bt);
+    const z0 = zBack + bt, inner = zFL - z0;
     const n = Math.max(2, Math.ceil((W - bt) / S.plintBakAfstand) + 1);
     const rails = [];
     for (let i = 0; i < n; i++) rails.push(lat(i === 0 ? 'Plintenbak zijkant links' : i === n - 1 ? 'Plintenbak zijkant rechts' : 'Plintenbak tussenlat', i * (W - bt) / (n - 1), z0, bt, inner));
-    if (afw) {
-      // Voorlat in stukken tussen de latten, gelijk met de voorkant van de latten (achter de plint).
-      for (let i = 0; i + 1 < rails.length; i++) {
-        const xa = rails[i].box.x + bt, xb = rails[i + 1].box.x;
-        if (xb - xa > 1) lat('Plintenbak voorlat', xa, zF - bt, xb - xa, bt);
-      }
+    // Schroefgaten door voor- en achterlat in de kopse kant van elke lat.
+    for (const r of rails) for (const pl of [voorlat, achterlat]) for (const f of [0.3, 0.7]) {
+      pl.ops.push({ kind: 'boring', face: 'boven', u: r.box.x + bt / 2, v: P * f, dia: S.schroefDia, diepte: bt, doorgaand: true, naam: 'Schroef' });
+      count('Schroef');
     }
     if (afw) {
       const pl = add({ id: 'plint', naam: 'Plint (op de bak)', rol: 'plint', mat: 'korpus', dikte: t, grain: 'u', edges: { v1: 0 },
         box: { x: 0, y: -P + td, z: zPl, w: W, h: P - td, d: t }, uLen: W, vLen: P - td });
-      // Clamex: in de voorkant van elke lat en in de binnenkant van de plint (op halve hoogte van de plint).
-      for (const r of rails) {
-        const yc = -P + td + (P - td) / 2;
-        r.ops.push({ kind: 'clamex', edge: 'u1', pos: yc + P, naam: 'Clamex (plint)' });
-        pl.ops.push({ kind: 'clamex', face: 'binnen', u: r.box.x + bt / 2, v: yc - pl.box.y, dir: [0, -1], naam: 'Clamex (plint)' });
+      // Clamex liggend tussen de latten: in de binnenkant van de plint en in de voorkant van de voorlat.
+      const yc = -P + td + (P - td) / 2;
+      for (let i = 0; i + 1 < rails.length; i++) {
+        const xc = (rails[i].box.x + rails[i + 1].box.x + bt) / 2;
+        pl.ops.push({ kind: 'clamex', face: 'binnen', u: xc, v: yc - pl.box.y, dir: [1, 0], naam: 'Clamex (plint)' });
+        voorlat.ops.push({ kind: 'clamex', face: 'boven', u: xc, v: yc + P, dir: [1, 0], naam: 'Clamex (plint)' });
         count('Lamello Clamex P-14');
       }
     }
@@ -1962,7 +1962,8 @@ function projectParts(project, S, maxLen = 2780) {
     return Math.abs(lx - Number(a.k.breedte)) < 2 && Math.abs(lz + Number(b.k.diepte) - Number(a.k.diepte)) < 2;
   });
   const keyOf = p => `${p.rol}|${p.naam.replace(/^Greeplijst [^,]+,/, 'G,')}|${Math.round(p.box.y)}|${Math.round(p.box.h)}|${Math.round(p.box.z)}|${Math.round(p.box.d)}|${p.decor}|${p.dikte}`;
-  const kind = p => p.rol === 'plint' || p.rol === 'greeplijst' || p.rol === 'trespa' || p.id === 'paslat-front-boven' || p.id === 'paslat-kast-boven';
+  const kind = p => p.rol === 'plint' || p.rol === 'greeplijst' || p.rol === 'trespa' || p.id === 'paslat-front-boven' || p.id === 'paslat-kast-boven'
+    || (p.rol === 'plintbak' && (p.naam === 'Plintenbak voor' || p.naam === 'Plintenbak achter'));   // plintenbak: voor- en achterlat doorlopend
   const W = it => Number(it.k.breedte);
   const hasLeft = new Set(ok.map(rightOf).filter(Boolean));
   for (const start of ok.filter(it => !hasLeft.has(it))) {
