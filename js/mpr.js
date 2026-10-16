@@ -8,12 +8,19 @@
 
 const MPR_DEFAULTS = {
   freesKlein: '156',        // Ø8: led-groeven en kleine kamers
-  freesContour: '130',      // wisselmesfrees Ø18: uitsparingen
+  freesContour: '130',      // wisselmesfrees Ø18 rechtsdraaiend: uitsparingen en contouren
+  freesContourLinks: '150', // wisselmesfrees Ø18 linksdraaiend
+  freesRichting: 'gelijkloop', // contour: het afgewerkte stuk in gelijkloop (minder uitbrokkelen), of 'tegenloop'
   groefMethode: 'zaag',     // 'zaag' (Nuten) of 'frees' (Tasche)
+  schuinMethode: 'frees',   // schuine kanten: 'frees' (130) of 'zaag' (300, Kontursaegen niet getest); de rug wordt altijd gefreesd
   zaagSchuin: '300',        // zaag voor schuine kanten (schuine kasten)
   groefTool: '1300',        // sponningzaag
   boorModusBlind: 'LS',     // langzaam-snel tot diepte
   boorModusDoor: 'LSL',     // langzaam-snel-langzaam doorgaand
+  boorTerugGrens: 20,       // dieper dan dit: boren met terugtrekken
+  boorTerugVul: 20,         // vuldiepte per stap
+  boorTerugMaat: 5,         // terugtrekmaat
+  boorTerugModus: 'STD',    // BM2-code in woodWOP
   doorExtra: 3,             // extra diepte bij doorgaand boren (P110: 21 mm bij 18 mm plaat)
   clamex: true,             // Clamex als component-macro (lamello_p_system) in het programma
 };
@@ -101,9 +108,9 @@ const CLAMEX_ROUTER = [
 "VA=\"Vertical 1\"",
 "VA=\"CA 0\"",
 "VA=\"LINE1 0000000000000000\"",
-"VA=\"P15 0\"",
-"VA=\"P14 1\"",
-"VA=\"P10 0\"",
+"VA=\"P15 {P15}\"",
+"VA=\"P14 {P14}\"",
+"VA=\"P10 {P10}\"",
 "VA=\"LINE2 0000000000000000\"",
 "VA=\"Trim 1\"",
 "VA=\"Drill 1\"",
@@ -156,13 +163,13 @@ const CLAMEX_SAW = [
 "VA=\"HorAg 1\"",
 "VA=\"HSK 0\"",
 "VA=\"LINE1 0000000000000000\"",
-"VA=\"P15 0\"",
-"VA=\"P14 1\"",
-"VA=\"P10 0\"",
+"VA=\"P15 {P15}\"",
+"VA=\"P14 {P14}\"",
+"VA=\"P10 {P10}\"",
 "VA=\"LINE2 0000000000000000\"",
 "VA=\"Trim 1\"",
 "VA=\"measure 0\"",
-"VA=\"Drill 0\"",
+"VA=\"Drill {DRILL}\"",
 "VA=\"DrillUni 0\"",
 "VA=\"Saw {SAW}\"",
 "VA=\"Comment 1\"",
@@ -225,8 +232,11 @@ const CLAMEX_SAW = [
 "MNM=\"Lamello_4s_45\"",
 "KO=\"00\""
 ];
+/** Een eigen sleufdiepte (bv. in een stijl hoogstens de halve dikte): vervangt de berekende L_Depth in de macro. */
+const clamexDepth = op => (Number(op.diepte) > 0 ? { LD: f3(op.diepte) } : {});
+
 function clamexBlock(tpl, vals) {
-  return tpl.map(l => l.replace(/\{(X|Y|Z|A|XY|ANG|SAW)\}/g, (_, k) => vals[k] ?? (k === 'ANG' ? '90' : k === 'SAW' ? '1' : ''))).join('\r\n') + '\r\n';
+  return tpl.map(l => (vals.LD && l.startsWith('VA="L_Depth ') ? `VA="L_Depth ${vals.LD}"` : l)).map(l => l.replace(/\{(X|Y|Z|A|XY|ANG|SAW|DRILL|P10|P14|P15)\}/g, (_, k) => vals[k] ?? ({ ANG: '90', SAW: '1', DRILL: '0', P14: '1', P10: '0', P15: '0' }[k] ?? ''))).join('\r\n') + '\r\n';
 }
 
 const f3 = n => String(Math.round(Number(n) * 1000) / 1000);
@@ -292,18 +302,26 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
   // Zijde B: gespiegeld in Y (paneel om de X-as gekeerd).
   const mapB = fr.mapB ?? ((u, v) => { const [x, y] = fr.map(u, v); return [x, fr.B - y]; });
 
+  // Diepe boringen (> boorTerugGrens): boren met terugtrekken, vuldiepte ZT en terugtrekmaat RM.
+  const peck = (diepte) => diepte > Number(M.boorTerugGrens ?? 20)
+    ? { BM2: M.boorTerugModus || 'STD', ZT: f3(Number(M.boorTerugVul ?? 20)), RM: f3(Number(M.boorTerugMaat ?? 5)) } : {};
+
   for (const op of p.ops) {
     if (op.kind === 'clamex') {
       if (!M.clamex) { skipped.push(`Clamex (${op.edge ? 'in de kant' : 'in het vlak'})`); continue; }
-      if (op.edge) {
+    if (op.edge) {
         // In de kant: zaag 201 (Lamello_4s_45). XY_Angle = welke kant: 270 = X 0, 90 = X max, 0 = Y 0, 180 = Y max.
-        const pt = op.edge === 'u0' ? [0, op.pos] : op.edge === 'u1' ? [p.uLen, op.pos] : op.edge === 'v0' ? [op.pos, 0] : [op.pos, p.vLen];
+        const pt0 = op.edge === 'u0' ? [0, op.pos] : op.edge === 'u1' ? [p.uLen, op.pos] : op.edge === 'v0' ? [op.pos, 0] : [op.pos, p.vLen];
+        const [bx, by] = fr.map(pt0[0], pt0[1]);
+        const xy = Math.abs(bx) < 0.01 ? 270 : Math.abs(bx - fr.L) < 0.01 ? 90 : Math.abs(by) < 0.01 ? 0 : 180;
+        // Een kant binnen de plaat (inset, bv. de voeg van een werkblad achter het weg te frezen stuk).
+        const ins = Number(op.inset) || 0;
+        const pt = op.edge === 'u0' ? [ins, op.pos] : op.edge === 'u1' ? [p.uLen - ins, op.pos] : op.edge === 'v0' ? [op.pos, ins] : [op.pos, p.vLen - ins];
         const [x, y] = fr.map(pt[0], pt[1]);
-        const xy = Math.abs(x) < 0.01 ? 270 : Math.abs(x - fr.L) < 0.01 ? 90 : Math.abs(y) < 0.01 ? 0 : 180;
         // Verstek: alleen bij de eerste Clamex van elke verbinding (kant) zaagt de macro ook het verstek.
         let saw = '1';
         if (op.hoek != null) { saw = mitreSawn.has(op.edge) ? '0' : '1'; mitreSawn.add(op.edge); }
-        sides.A.push(clamexBlock(CLAMEX_SAW, { X: f3(x), Y: f3(y), A: f3(D / 2), XY: xy, ANG: f3(op.hoek ?? 90), SAW: saw }));
+        sides.A.push(clamexBlock(CLAMEX_SAW, { X: f3(x), Y: f3(y), A: f3(D / 2), XY: xy, ANG: f3(op.hoek ?? 90), SAW: saw, DRILL: op.boorGat ? '1' : '0', ...clamexDepth(op) }));
       } else {
         // In het vlak: frees 202 (Lamello_router), zoals in de bestanden met XY_Angle 270.
         const onB = op.face === fr.down;
@@ -314,34 +332,58 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
         const [du, dv] = op.dir ?? [1, 0];
         const [x2, y2] = mp(op.u + du * 10, op.v + dv * 10);
         const xy = op.dir ? Math.round(((Math.atan2(y2 - y, x2 - x) * 180 / Math.PI) + 360) % 360 * 1000) / 1000 : 270;
-        (onB ? sides.B : sides.A).push(clamexBlock(CLAMEX_ROUTER, { X: f3(x), Y: f3(y), Z: f3(D), XY: xy }));
+        (onB ? sides.B : sides.A).push(clamexBlock(CLAMEX_ROUTER, { X: f3(x), Y: f3(y), Z: f3(D), XY: xy, ...clamexDepth(op) }));
       }
       continue;
     }
     if (op.kind === 'contour') {
-      // Schuine kant: zagen op contour met de zaag (nr. 300) door de volle dikte, 20 mm voorbij beide randen.
-      // De zaaglijn ligt een halve zaagdikte aan de kant van het afval, zodat de maat klopt.
-      // Als laatste bewerking, zodat het stuk tijdens het boren heel blijft.
-      const a0 = fr.map(...op.pts[0]), b0 = fr.map(...op.pts[op.pts.length - 1]);
-      const len = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) || 1;
-      const dx = (b0[0] - a0[0]) / len, dy = (b0[1] - a0[1]) / len;
+      // Contour door de volle dikte (schuine kant, werkbladvoeg): frezen met de contourfrees, of zagen (zaag 300).
+      // De baan ligt een halve freesdiameter (of zaagdikte) aan de kant van het afval, zodat de maat klopt, en loopt
+      // 20 mm voorbij beide uiteinden. Als laatste bewerking, zodat het stuk tijdens het boren heel blijft.
+      // Een polylijn (bv. werkbladvoeg: verstek vooraan, dan recht) wordt altijd gefreesd.
+      const P = op.pts.map(q => fr.map(...q));
+      const dirs = P.slice(1).map((q, i) => { const l = Math.hypot(q[0] - P[i][0], q[1] - P[i][1]) || 1; return [(q[0] - P[i][0]) / l, (q[1] - P[i][1]) / l]; });
       const [wx, wy] = fr.map(...op.waste);
-      const left = -dy * (wx - a0[0]) + dx * (wy - a0[1]) > 0;
-      const saw = (M.tools ?? P110_TOOLS).find(x => String(x.nr) === String(M.zaagSchuin ?? '300'));
-      const half = (Number(saw?.lengte) || 3.4) / 2, nx = (left ? -dy : dy) * half, ny = (left ? dx : -dx) * half;
-      const a = [a0[0] + nx, a0[1] + ny], b = [b0[0] + nx, b0[1] + ny];
-      const p0 = [a[0] - dx * 20, a[1] - dy * 20], p1 = [b[0] + dx * 20, b[1] + dy * 20];
+      const left = -dirs[0][1] * (wx - P[0][0]) + dirs[0][0] * (wy - P[0][1]) > 0;   // afval links van de baan?
+      const frees = P.length > 2 || p.rol === 'rug' || p.rol === 'werkblad' || M.schuinMethode === 'frees';
+      const tools = M.tools ?? P110_TOOLS;
+      // Draairichting tegen uitbrokkelen: het afgewerkte stuk aan de kant van gelijkloop. Een rechtsdraaiende frees
+      // (130) loopt in gelijkloop aan zijn linkerkant, een linksdraaiende (150) aan zijn rechterkant.
+      const stukLinks = !left;
+      const gelijk = (M.freesRichting ?? 'gelijkloop') === 'gelijkloop';
+      const tno = frees ? (stukLinks === gelijk ? (M.freesContour ?? '130') : (M.freesContourLinks ?? '150')) : (M.zaagSchuin ?? '300');
+      const tool = tools.find(x => String(x.nr) === String(tno));
+      const half = frees ? (Number(tool?.dia) || 18) / 2 : (Number(tool?.lengte) || 3.4) / 2;
+      const nrm = ([dx, dy]) => (left ? [-dy * half, dx * half] : [dy * half, -dx * half]);
+      // Hoekpunten van de verschoven baan: snijpunt van de verschoven segmenten.
+      const pathPts = [];
+      const n0 = nrm(dirs[0]);
+      pathPts.push([P[0][0] + n0[0] - dirs[0][0] * 20, P[0][1] + n0[1] - dirs[0][1] * 20]);
+      for (let i = 1; i < P.length - 1; i++) {
+        const d1 = dirs[i - 1], d2 = dirs[i], a1 = nrm(d1), a2 = nrm(d2);
+        const q1 = [P[i][0] + a1[0], P[i][1] + a1[1]], q2 = [P[i][0] + a2[0], P[i][1] + a2[1]];
+        const den = d1[0] * d2[1] - d1[1] * d2[0];
+        if (Math.abs(den) < 1e-9) { pathPts.push(q1); continue; }
+        const tt = ((q2[0] - q1[0]) * d2[1] - (q2[1] - q1[1]) * d2[0]) / den;
+        pathPts.push([q1[0] + d1[0] * tt, q1[1] + d1[1] * tt]);
+      }
+      const dl = dirs[dirs.length - 1], nl = nrm(dl), Pl = P[P.length - 1];
+      pathPts.push([Pl[0] + nl[0] + dl[0] * 20, Pl[1] + nl[1] + dl[1] * 20]);
       const nr = contours.length + 1, z = -Number(M.contourDoor ?? 1);
-      const wi = (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI);
       const el = (i, kind, [x, y], extra) => [`$E${i}`, kind, `X=${f3(x)}`, `Y=${f3(y)}`, `Z=${f3(z)}`, ...extra(x, y), ''].join('\r\n');
-      contours.push([
-        `]${nr}`,
-        el(0, 'KP', p0, (x, y) => ['KO=00', `.X=${f3(x)}`, `.Y=${f3(y)}`, `.Z=${f3(z)}`, '.KO=00']),
-        el(1, 'KL', p1, (x, y) => [`.X=${f3(x)}`, `.Y=${f3(y)}`, `.Z=${f3(z)}`, `.WI=${f3(wi)}`, '.WZ=0']),
-      ].join('\r\n') + '\r\n' + block('<193 \\Kontursaegen\\', {
+      const elems = [el(0, 'KP', pathPts[0], (x, y) => ['KO=00', `.X=${f3(x)}`, `.Y=${f3(y)}`, `.Z=${f3(z)}`, '.KO=00'])];
+      for (let i = 1; i < pathPts.length; i++) {
+        const [px, py] = pathPts[i - 1], [qx, qy] = pathPts[i];
+        const wi = (Math.atan2(qy - py, qx - px) + 2 * Math.PI) % (2 * Math.PI);
+        elems.push(el(i, 'KL', pathPts[i], (x, y) => [`.X=${f3(x)}`, `.Y=${f3(y)}`, `.Z=${f3(z)}`, `.WI=${f3(wi)}`, '.WZ=0']));
+      }
+      contours.push([`]${nr}`, ...elems].join('\r\n') + '\r\n' + (frees ? block('<105 \\Konturfraesen\\', {
+        EA: `${nr}:0`, MDA: 'SEN', RK: 'NOWRK', EE: `${nr}:${pathPts.length - 1}`, MDE: 'SEN_AB', EM: '0', RI: '1',
+        TNO: tno, SM: '0', S_: 'STANDARD', F_: '5', HP: '0', AB: '0', ZA: '@0',
+      }) : block('<193 \\Kontursaegen\\', {
         EA: `${nr}:0`, MDA: 'SEN', RK: 'NoWRK', TPZ: '0', BL: '0', EE: `${nr}:1`, MDE: 'SEN_AB', RI: '0',
-        TNO: M.zaagSchuin ?? '300', SM: '0', S_: 'STANDARD', F_: '5', UZU: '1', F_Z: '0', AB: '0', Z_: '0', ZA: '@0', HP: '0', SP: '0',
-      }));
+        TNO: tno, SM: '0', S_: 'STANDARD', F_: '5', UZU: '1', F_Z: '0', AB: '0', Z_: '0', ZA: '@0', HP: '0', SP: '0',
+      })));
       continue;
     }
     if (op.kind === 'verstek') {
@@ -367,10 +409,12 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       continue;
     }
     if (op.kind === 'rondgat') {
-      // Ronde uitsparing door de plaat: kamer met de kleine frees, vanaf zijde A.
-      const [x, y] = fr.map(op.u, op.v);
-      sides.A.push(block('<112 \\Tasche\\', {
-        XA: f3(x), YA: f3(y), LA: f3(op.dia), BR: f3(op.dia), RD: f3(op.dia / 2), WI: '0', TI: f3(D + 2), ZT: '0', XY: '80',
+      // Ronde uitsparing: kamer met de kleine frees; door de plaat vanaf zijde A, of blind (op.diepte) in het gekozen vlak.
+      const blind = Number(op.diepte) > 0 && op.diepte < D;
+      const onB = blind && op.face === fr.down;
+      const [x, y] = (onB ? mapB : fr.map)(op.u, op.v);
+      (onB ? sides.B : sides.A).push(block('<112 \\Tasche\\', {
+        XA: f3(x), YA: f3(y), LA: f3(op.dia), BR: f3(op.dia), RD: f3(op.dia / 2), WI: '0', TI: f3(blind ? op.diepte : D + 2), ZT: '0', XY: '80',
         T_: M.freesKlein, F_: 'STANDARD', DS: '0', KO: '00',
       }));
       continue;
@@ -388,7 +432,12 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       const dir = Math.abs(x) < 0.01 ? 'XP' : Math.abs(x - fr.L) < 0.01 ? 'XM' : Math.abs(y) < 0.01 ? 'YP' : 'YM';
       const prob = checkDrill(M.tools ?? P110_TOOLS, { dia: op.dia, diepte: op.diepte, horizontaal: true, richting: dir });
       if (prob) skipped.push(`Let op: ${prob}`);
-      out.push(block('<103 \\BohrHoriz\\', { XA: f3(x), YA: f3(y), ZA: f3(D / 2), BM: dir, TI: f3(op.diepte), DU: f3(op.dia), AN: '1', MI: '0', AB: '32', KO: '00' }));
+      // Het horizontale boorblok heeft enkel Ø8. Een andere diameter (push-open Ø10) gaat met een boor in de
+      // freesspil (zonder vaste richting, nr. 160): die wordt met WW vastgelegd, zoals WW="1006" voor de Ø35.
+      const spil = (M.tools ?? P110_TOOLS).filter(t => t.soort === 'boorH' && !t.richting && Math.abs(t.dia - op.dia) < 0.3);
+      const blok = (M.tools ?? P110_TOOLS).some(t => t.soort === 'boorH' && t.richting && Math.abs(t.dia - op.dia) < 0.3);
+      const ww = !blok && spil.length ? { WW: spil.map(t => t.nr).join(',') } : {};
+      out.push(block('<103 \\BohrHoriz\\', { XA: f3(x), YA: f3(y), ZA: f3(D / 2), BM: dir, TI: f3(op.diepte), DU: f3(op.dia), AN: '1', MI: '0', AB: '32', ...peck(op.diepte), ...ww, KO: '00' }));
       continue;
     }
     if (op.kind === 'boring') {
@@ -397,7 +446,8 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       if (prob) skipped.push(`Let op: ${prob}`);
       out.push(block('<102 \\BohrVert\\', {
         XA: f3(x), YA: f3(y), BM: through ? M.boorModusDoor : M.boorModusBlind,
-        TI: f3(through ? D + Number(M.doorExtra || 0) : op.diepte), DU: f3(op.dia), AN: '1', MI: '0', AB: '32', WI: '0', S_: '2', KO: '00',
+        TI: f3(through ? D + Number(M.doorExtra || 0) : op.diepte), DU: f3(op.dia), AN: '1', MI: '0', AB: '32', WI: '0', S_: '2',
+        ...peck(through ? D : op.diepte), KO: '00',
       }));
     } else if (op.kind === 'groef') {
       const [xa, ya] = map(op.u1, op.v1);
@@ -497,11 +547,11 @@ function projectMprZip(project, S, M) {
   let count = 0;
   // Alles in één map met de naam van het project; elk bestand begint met het kastnummer.
   const dir = safeName(project.naam || 'Project');
-  for (const k of project.kasten) {
-    const res = buildCabinet(k, S);
+  // Met de doorlopende stukken (plint, greeplijst, paslat boven) zoals in de zaaglijst.
+  for (const { k, res, parts } of projectParts(project, S)) {
     if (res.error) { notes.push(`${k.code}: ${res.error}`); continue; }
-    const names = mprNames(k.code, res.parts);
-    for (const p of res.parts) {
+    const names = mprNames(k.code, parts);
+    for (const p of parts) {
       if (!names.has(p.id)) continue;   // panelen zonder bewerking hoeven niet op de CNC
       const { files, skipped } = mprForPart(p, M, names.get(p.id));
       for (const f of files) { zip.add(`${dir}/${f.name}`, f.text); count++; }
@@ -514,6 +564,17 @@ function projectMprZip(project, S, M) {
         if (checks.length) notes.push(`${k.code} ${p.naam}: ${checks.map(([s, c]) => `${c}× ${s.replace('Let op: ', '')}`).join(', ')}.`);
       }
     }
+  }
+  // Werkbladen van plaat (met hoekverbinding, tabletverbinders, Clamex).
+  if (typeof werkbladGeometry === 'function') {
+    werkbladGeometry(project, S).forEach((g, i) => {
+      const p = g.parts.find(q => q.rol === 'werkblad');
+      if (!p || p.materiaal !== 'plaat' || !p.ops.length) return;
+      const { files, skipped } = mprForPart(p, M, `WB${String(i + 1).padStart(2, '0')}_${safeName(p.naam)}`);
+      for (const f of files) { zip.add(`${dir}/${f.name}`, f.text); count++; }
+      for (const s2 of new Set(skipped)) notes.push(`${p.naam}: ${s2.replace('Let op: ', '')}`);
+      if (p.uLen > 3000) notes.push(`${p.naam}: ${Math.round(p.uLen)} mm lang, controleer of het op de P110 past.`);
+    });
   }
   const readme = [
     `MPR-bestanden voor ${project.naam}`,

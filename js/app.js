@@ -632,11 +632,12 @@ function openWorktop(p, wb, onDone) {
         ${row('Overstek links', numHTML('wb-links', wb.links, '0'))}
         ${row('Overstek rechts', numHTML('wb-rechts', wb.rechts, '0'))}
         ${row('Afstand tot de muur', numHTML('wb-achter', wb.achter, '0'))}
+        ${g?.hoeken?.length ? row('In de hoek', selectHTML('wb-hoekDoor', [['auto', 'Automatisch (langste loopt door)'], ['ja', 'Dit blad loopt door'], ['nee', 'Het andere blad loopt door']], wb.hoekDoor ?? 'auto')) : ''}
         ${row('Uiteinde links', selectHTML('wb-eL', [['recht', 'Recht'], ['verstek', 'Verstek 45° (hoek)']], wb.eindeLinks ?? 'recht'))}
         ${row('Uiteinde rechts', selectHTML('wb-eR', [['recht', 'Recht'], ['verstek', 'Verstek 45° (hoek)']], wb.eindeRechts ?? 'recht'))}
         ${row('Spatwand hoogte', numHTML('wb-spatH', wb.spatHoogte, 'geen'))}
         ${Number(wb.spatHoogte) > 0 ? row('Spatwand dikte', numHTML('wb-spatD', wb.spatDikte, '12')) : ''}
-      </div><div class="group-footer">${g ? `Werkblad ${mm(g.rect.lengte)} × ${mm(g.rect.diepte)} × ${mm(g.rect.dikte)} mm op ${esc(g.ks.map(x => x.code).join(', '))}.` : ''} Bij een hoek: laat het ene werkblad doorlopen tot in de hoek (overstek = diepte van het andere) of zet beide uiteinden in verstek.</div></div>
+      </div><div class="group-footer">${g ? `Werkblad ${mm(g.rect.lengte)} × ${mm(g.rect.diepte)} × ${mm(g.rect.dikte)} mm op ${esc(g.ks.map(x => x.code).join(', '))}.` : ''} ${g?.hoeken?.length ? `Hoekverbinding met ${esc(g.hoeken.map(h => `${h.partner.naam || 'werkblad'} (dit blad ${h.door ? 'loopt door' : 'stoot'})`).join(', '))}: vooraan ${S().werkbladHoekVerstek} mm verstek, de rest recht gefreesd, ${S().trekkerAantal} tabletverbinders en Clamex. Overstek en uiteinde aan die kant tellen niet.` : 'Twee werkbladen die haaks op elkaar staan worden automatisch een hoekverbinding.'}</div></div>
       <div class="group"><div class="group-header">Uitsparingen</div><div class="group-body">
         ${(g?.cut ?? []).map(c => `<div class="row sub-head"><span class="row-sub"><b>${esc(c.naam)}</b>${c.auto ? ' (automatisch)' : ''}</span>
           <button class="mini danger" type="button" data-cdel="${c.kast ?? c.id}" aria-label="Verwijder">${icon('trash')}</button></div>
@@ -651,6 +652,7 @@ function openWorktop(p, wb, onDone) {
     for (const [id, key] of [['wb-dikte', 'dikte'], ['wb-voor', 'voor'], ['wb-links', 'links'], ['wb-rechts', 'rechts'], ['wb-achter', 'achter'], ['wb-spatD', 'spatDikte']]) $(`#${id}`, body)?.addEventListener('change', e => { wb[key] = num(e.target); save(); render(); });
     $('#wb-spatH', body).addEventListener('change', e => { wb.spatHoogte = num(e.target); save(); render(); });
     $('#wb-eL', body).addEventListener('change', e => { wb.eindeLinks = e.target.value; save(); });
+    $('#wb-hoekDoor', body)?.addEventListener('change', e => { wb.hoekDoor = e.target.value; save(); render(); });
     $('#wb-eR', body).addEventListener('change', e => { wb.eindeRechts = e.target.value; save(); });
     const dec = $('#wb-decor', body); if (dec) bindDecor(dec, v => { wb.decor = v || null; save(); });
     $('#wb-decor-tekst', body)?.addEventListener('change', e => { wb.decor = e.target.value; save(); });
@@ -905,8 +907,12 @@ function openCabinet(project, k, selectId = null) {
         ${row('Uitsparing achteraan (koker)', selectHTML('f-usHoek', [['', 'Geen'], ['links', 'Links achter'], ['rechts', 'Rechts achter']], k.uitsparing?.hoek ?? ''))}
         ${k.uitsparing?.hoek ? `${row('Uitsparing breedte', numHTML('f-usB', k.uitsparing.breedte))}${row('Uitsparing diepte', numHTML('f-usD', k.uitsparing.diepte))}
           ${k.uitsparing.auto ? '<div class="row"><span class="row-sub">Automatisch berekend uit een obstakel in het project. Pas je de maat hier aan, dan blijft jouw maat staan.</span></div>' : ''}` : ''}
+        <div class="row"><span class="row-label">Zijpaneel links (afwerking)</span>${toggleHTML('f-zp-links', k.zijpaneel?.links)}</div>
+        <div class="row"><span class="row-label">Zijpaneel rechts (afwerking)</span>${toggleHTML('f-zp-rechts', k.zijpaneel?.rechts)}</div>
+        ${k.zijpaneel?.links || k.zijpaneel?.rechts ? row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${S().front} (front)`)) : ''}
         ${row('Paslat links (breedte)', numHTML('f-paslat-links', k.paslat?.links, 'geen'))}
         ${row('Paslat rechts (breedte)', numHTML('f-paslat-rechts', k.paslat?.rechts, 'geen'))}
+        ${row('Paslat boven (hoogte)', numHTML('f-paslat-boven', k.paslat?.boven, 'geen'))}
         <div class="row"><span class="row-label">Zijwand links in zicht</span>${toggleHTML('f-zichtL', k.zichtL)}</div>
         <div class="row"><span class="row-label">Zijwand rechts in zicht</span>${toggleHTML('f-zichtR', k.zichtR)}</div>
       </div><div class="group-footer">Laat een dikte leeg voor de standaard uit Instellingen. Bij een rug in een groef groeit de groef mee met de rug.${k.secties.some(x => x.type === 'toestel') ? ` Met toestellen: geen rug achter de toestellen en de rug ${S().rugInsprongToestel} mm naar voren; verluchting is een dubbele bodem onderaan en een dubbele regel bovenaan: de binnenste gelijk met de voorkant, de buitenste naar achteren. Met een volle top komt er bovenaan geen dubbele regel: de lucht gaat achter de rug naar boven.` : ''} Een zijwand in zicht wordt verbonden met Clamex, anders met deuvels en schroeven.</div></div>
@@ -959,7 +965,9 @@ function openCabinet(project, k, selectId = null) {
     };
     $('#f-usHoek', form)?.addEventListener('change', e => { k.uitsparing = e.target.value ? { breedte: 100, diepte: 100, ...(k.uitsparing ?? {}), hoek: e.target.value, auto: false } : null; renderForm(); update(); });
     for (const [id, key] of [['f-usB', 'breedte'], ['f-usD', 'diepte']]) $(`#${id}`, form)?.addEventListener('input', e => { k.uitsparing = { ...(k.uitsparing ?? {}), [key]: e.target.value === '' ? null : Number(e.target.value), auto: false }; update(); });
-    for (const kant of ['links', 'rechts']) $(`#f-paslat-${kant}`, form)?.addEventListener('input', e => {
+    for (const kant of ['links', 'rechts']) $(`#f-zp-${kant}`, form)?.addEventListener('change', e => { k.zijpaneel = { ...(k.zijpaneel ?? {}), [kant]: e.target.checked }; renderForm(); update(); });
+    $('#f-zijpaneelDikte', form)?.addEventListener('input', e => { k.zijpaneelDikte = e.target.value === '' ? null : Number(e.target.value); update(); });
+    for (const kant of ['links', 'rechts', 'boven']) $(`#f-paslat-${kant}`, form)?.addEventListener('input', e => {
       k.paslat = { ...(k.paslat ?? {}), [kant]: e.target.value === '' ? null : Number(e.target.value) };
       update();
     });
@@ -1110,6 +1118,8 @@ function openCabinet(project, k, selectId = null) {
         <button class="mini" type="button" data-st-add>${icon('plus')} Stijl</button>
         ${st.length ? `<button class="mini" type="button" data-st-eq>Gelijk verdelen</button>` : ''}</div></div>
       ${st.length ? row('Stijlen terug van voorkant', numHTML(`s-stijlTerug-${i}`, s.stijlTerug, 'gelijk')) : ''}
+      ${st.length && s.type === 'deur' ? `<div class="row"><span class="row-label">Deuren per deel (bv. brievenbussen)</span>${toggleHTML(`s-deurPerDeel-${i}`, s.deurPerDeel)}</div>
+        ${s.deurPerDeel ? row('Scharnieren per deel', selectHTML(`s-scharnierPerDeel-${i}`, [['links', 'Links'], ['rechts', 'Rechts']], s.scharnierPerDeel ?? 'links')) : ''}` : ''}
       <div class="row sub-head"><span class="row-sub"><b>Vaste legplanken</b> (vrije hoogte eronder, vanaf de onderkant van het vak)</span></div>
       ${vl.map((f, j) => `<div class="row"><span class="row-label">Vast ${j + 1}</span><div class="row-fill">${numHTML(`s-vl-${i}-${j}`, f.hoogte)}
         ${st.length ? selectHTML(`s-vld-${i}-${j}`, delen, String(f.deel ?? 0)) : ''}
@@ -1153,6 +1163,8 @@ function openCabinet(project, k, selectId = null) {
       $(`#s-vld-${i}-${j}`, card)?.addEventListener('change', e => { f.deel = Number(e.target.value) || 0; update(); });
     });
     for (const key of ['stijlTerug', 'vastTerug']) $(`#s-${key}-${i}`, card)?.addEventListener('change', e => { s[key] = e.target.value === '' ? null : Number(e.target.value); update(); });
+    $(`#s-deurPerDeel-${i}`, card)?.addEventListener('change', e => { s.deurPerDeel = e.target.checked; renderSections(); update(); });
+    $(`#s-scharnierPerDeel-${i}`, card)?.addEventListener('change', e => { s.scharnierPerDeel = e.target.value; update(); });
     $$('[data-vl-del]', card).forEach(b => b.addEventListener('click', () => { s.vasteLegplanken.splice(Number(b.dataset.vlDel), 1); redo(); }));
     $('[data-vl-add]', card).addEventListener('click', () => { s.vasteLegplanken = [...(s.vasteLegplanken ?? []), { hoogte: 0, deel: 0 }]; eqVast(); redo(); });
     $('[data-vl-eq]', card)?.addEventListener('click', () => { eqVast(); redo(); });
@@ -1473,9 +1485,10 @@ function cutRows(project) {
   }
   // Werkbladen: zelf gemaakt (plaat) in de zaaglijst; composiet/hout op de bestellijst (bij het beslag).
   for (const g of werkbladGeometry(project, S())) {
+    for (const h of g.hardware ?? []) hardware[h.naam] = (hardware[h.naam] ?? 0) + h.aantal;
     for (const p of g.parts.filter(q => q.rol === 'werkblad' || q.rol === 'spatwand')) {
       if (p.materiaal === 'plaat') rows.push({ kast: 'Werkblad', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p) });
-      else bestel[`${p.rol === 'spatwand' ? 'Spatwand' : 'Werkblad'} ${p.plaattype.toLowerCase()} ${Math.round(p.uLen)} × ${Math.round(p.vLen)} × ${p.dikte} (${p.decor || ''})${p.rol === 'werkblad' && g.cut.length ? `, ${g.cut.length} uitsparing(en)` : ''}`] = 1;
+      else bestel[`${p.rol === 'spatwand' ? 'Spatwand' : 'Werkblad'} ${p.plaattype.toLowerCase()} ${Math.round(p.uLen)} × ${Math.round(p.vLen)} × ${p.dikte} (${p.decor || ''})${p.rol === 'werkblad' && g.cut.length ? `, ${g.cut.length} uitsparing(en)` : ''}${p.rol === 'werkblad' && g.hoeken?.length ? `, hoekverbinding met ${g.hoeken.map(h => `${h.partner.naam || 'werkblad'} (${h.door ? 'loopt door' : 'stoot'})`).join(', ')}` : ''}`] = 1;
     }
   }
   // Afwerkpanelen van het project.
@@ -1854,14 +1867,15 @@ const SETTING_GROUPS = [
   ['Kantenband', [['bandKorpus', 'Voorkant korpus (mm)'], ['bandLegplank', 'Voorkant legplank (mm)'], ['bandFront', 'Rondom fronten (mm)']]],
   ['Fronten', [['voeg', 'Voeg tussen fronten'], ['deurMaxBreedte', 'Max. breedte van één deur'], ['greepHartafstand', 'Greep hart-op-hart (standaard)'], ['greepDia', 'Greepgat Ø'], ['greepRand', 'Greep afstand tot rand'], ['greepVanBoven', 'Greep (deur) vanaf boven'], ['greepHoogteKolom', 'Kolomkast met toestel: greep op hoogte'], ['greepHoogteKolomZonder', 'Kolomkast zonder toestel: greep op hoogte'], ['greepVanOnder', 'Kolomkast: deur erboven, greep vanaf onder'], ['greeplijstBinnenHoogte', 'Greeplijst: binnenhoogte'], ['greeplijstBinnenDiepte', 'Greeplijst: binnendiepte'], ['greepGrijp', 'Greeplijst: front steekt uit in de greep']]],
   ['Deuvels en schroeven', [['deuvelDia', 'Deuvel Ø'], ['deuvelLengte', 'Deuvel lengte'], ['deuvelEersteVoor', 'Eerste deuvel vanaf voor'], ['deuvelPaar', 'Tweede deuvel: + (paar)'], ['deuvelLaatsteAchter', 'Laatste deuvel vanaf achter'], ['deuvelMaxTussen', 'Max. afstand ertussen'], ['schroefVoor', 'Eerste schroef vanaf voor'], ['schroefAchter', 'Laatste schroef vanaf achter'], ['deuvelDiepteVlak', 'Diepte in het vlak'], ['deuvelDiepteKant', 'Diepte in de kant'], ['schroefDia', 'Schroefgat Ø']]],
-  ['Clamex', [['clamexMarge', 'Eerste en laatste vanaf voor/achter'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexDeuvel', 'Deuvel naast de Clamex (±)']]],
+  ['Clamex', [['clamexMarge', 'Eerste en laatste vanaf voor/achter'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexDeuvel', 'Deuvel naast de Clamex (±)'], ['clamexLengte', 'Sleuflengte (tegenover elkaar binnen)'], ['clamexDiepte', 'Sleufdiepte per onderdeel']]],
   ['Hangkasten', [['ophangVanBoven', 'Ophanggaten vanaf boven'], ['ophangVanAchter', 'Ophanggaten vanaf achter'], ['ophangDia', 'Ophanggat Ø'], ['ophangDiepte', 'Ophanggat diepte']]],
   ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder'], ['scharnierDeuvelDiepte', 'Deuvelgaatjes scharnier diepte'], ['plaatjeHoogte', 'Hoogte montageplaatje'], ['scharnierVrij', 'Vrij rond regels/tussenbodems'], ['scharnierInbouw', 'Schuine kast: scharnier steekt de kast in'], ['blindPlaatRand', 'Blinde hoek: plaatje vanaf kant blindpaneel'], ['blindPlaatTussen', 'Blinde hoek: afstand tussen gaten'], ['blindPlaatDia', 'Blinde hoek: gat Ø'], ['blindPlaatDiepte', 'Blinde hoek: gat diepte'], ['demperRand', 'Demper vanaf de hoek'], ['demperDia', 'Demper Ø'], ['demperDiepte', 'Demper diepte']]],
   ['Systeemboringen', [['systeemVoor', 'Vanaf voorkant'], ['systeemVoorSmal', 'Vanaf voorkant in smalle kast'], ['systeemSmalGrens', 'Smalle kast: breedte kleiner dan'], ['systeemAchter', 'Vanaf rug'], ['systeemRaster', 'Raster'], ['systeemMarge', 'Vanaf boven/onder'], ['systeemDia', 'Ø'], ['systeemDiepte', 'Diepte']]],
   ['Markeringen', [['pootRandZij', 'Stelpoot: vanaf zijkant bodem'], ['pootVoor', 'Stelpoot: vanaf voorkant'], ['pootAchter', 'Stelpoot: vanaf achterkant'], ['pootVierkant', 'Stelpoot: vierkant puntjes'], ['pootMiddenVoor', 'Middenpoot voor vanaf breedte'], ['pootMiddenAchter', 'Middenpoot achter vanaf breedte'], ['pootDia', 'Puntje Ø'], ['pootDiepte', 'Puntje diepte'], ['hoekMerkRand', 'Merk zijwand: vanaf onder/achter'], ['hoekMerkDia', 'Merk zijwand Ø'], ['hoekMerkDiepte', 'Merk zijwand diepte']]],
   ['Ladegeleiders', [['frontBevZij', 'Frontbevestiging: vanaf binnenkant zijwand'], ['frontBevDia', 'Frontbevestiging Ø'], ['frontBevDiepte', 'Frontbevestiging diepte'], ['geleiderDia', 'Punten geleider Ø (euroschroef)'], ['geleiderDiepte', 'Punten geleider diepte'], ['geleiderAchterVrij', 'Laatste punt min. voor einde geleider'], ['binnenladeOpvul', 'Binnenladen: dikte opvullijst'], ['opvulLengte', 'Opvullijst: lengte'], ['opvulHoogte', 'Opvullijst: hoogte'], ['opvulSchroeven', 'Opvullijst: schroeven per lijst'], ['binnenladeTerug', 'Binnenladen: binnenfront terug van voorkant'], ['binnenfrontExtra', 'Binnenfront: hoogte rug + '], ['binnenladeTussen', 'Binnenladen: ruimte ertussen'], ['ladeSponningBreedte', 'Bodem/rug: sponning breedte'], ['ladeSponningDiepte', 'Bodem/rug: sponning diepte'], ['ladeSchroefAfstand', 'Schroeven bodem in rug: afstand']]],
   ['Led-verlichting', [['ledBreedte', 'Breedte groef'], ['ledDiepte', 'Diepte groef'], ['ledAfstand', 'Standaard afstand tot rand'], ['ledKabelDia', 'Kabelgat Ø'], ['ledKabelAfstand', 'Kabelgat vanaf einde groef']]],
-  ['Overige', [['regelBreedte', 'Breedte regels'], ['hangGreepUitsteek', 'Hangkast greeploos: front steekt onder uit'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['plintBakDikte', 'Plintenbak: dikte multiplex'], ['plintBakAfstand', 'Plintenbak: tussenlatten om de'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
+  ['Werkbladen in een hoek', [['werkbladHoekVerstek', 'Verstek vooraan (afgeronde kant)'], ['trekkerAantal', 'Tabletverbinders per hoek'], ['trekkerVoor', 'Eerste verbinder vanaf voorkant'], ['trekkerAchter', 'Laatste verbinder vanaf muur'], ['trekkerAfstand', 'Gat: hart tot de voeg'], ['trekkerDia', 'Gat Ø'], ['trekkerDiepte', 'Gat diepte'], ['trekkerSleuf', 'Sleuf breedte'], ['trekkerSleufDiepte', 'Sleuf diepte'], ['trekkerClamexVrij', 'Clamex minstens vanaf verbinder']]],
+  ['Overige', [['regelBreedte', 'Breedte regels'], ['hangGreepUitsteek', 'Hangkast greeploos: front steekt onder uit'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['plintBakDikte', 'Plintenbak: dikte multiplex'], ['plintBakAfstand', 'Plintenbak: tussenlatten om de'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankDikGrens', 'Legplank dikker vanaf lengte'], ['legplankDik', 'Dikte lange legplank'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
 ];
 
 const SettingsView = {
@@ -1960,7 +1974,10 @@ const SettingsView = {
           ${row('CSV: decimaalteken', selectHTML('nz-csvDecimaal', [['.', 'Punt (12.5)'], [',', 'Komma (12,5)']], s.nest.csvDecimaal ?? '.'))}
         </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde. HPO-plaattype: de naam van de plaat in de platendatabank van de zaag, {decor} en {dikte} worden ingevuld (MEL_{decor}_{dikte} → MEL_W980_18). Die naam moet exact bestaan in HPO.</div></div>
         <div class="group"><div class="group-header">Machine (woodWOP)</div><div class="group-body">
-          <div class="row"><span class="row-label">Frees voor uitsparingen</span><div class="row-fill"><input class="input-num" id="mp-freesContour" value="${esc(s.mpr.freesContour)}"></div></div>
+          <div class="row"><span class="row-label">Contourfrees linksdraaiend</span><div class="row-fill"><input class="input-num" id="mp-freesContourLinks" value="${esc(s.mpr.freesContourLinks ?? '150')}"></div></div>
+          ${row('Freesrichting contouren', selectHTML('mp-freesRichting', [['gelijkloop', 'Gelijkloop aan het stuk (minder uitbrokkelen)'], ['tegenloop', 'Tegenloop aan het stuk']], s.mpr.freesRichting ?? 'gelijkloop'))}
+          <div class="row"><span class="row-label">Contourfrees rechtsdraaiend (en uitsparingen)</span><div class="row-fill"><input class="input-num" id="mp-freesContour" value="${esc(s.mpr.freesContour)}"></div></div>
+          ${row('Schuine kanten', selectHTML('mp-schuinMethode', [['frees', 'Frezen (contourfrees)'], ['zaag', 'Zagen (zaag 300)']], s.mpr.schuinMethode ?? 'frees'))}
           <div class="row"><span class="row-label">Zaag schuine kanten</span><div class="row-fill"><input class="input-num" id="mp-zaagSchuin" value="${esc(s.mpr.zaagSchuin ?? '300')}"></div></div>
           <div class="row"><span class="row-label">Kleine frees</span><div class="row-fill"><input class="input-num" id="mp-freesKlein" value="${esc(s.mpr.freesKlein)}"></div></div>
           ${row('Rugwandgroef', selectHTML('mp-groefMethode', [['zaag', 'Zagen (Nuten)'], ['frees', 'Frezen (kleine frees)']], s.mpr.groefMethode))}
@@ -1968,6 +1985,10 @@ const SettingsView = {
           ${row('Boren tot diepte', selectHTML('mp-boorModusBlind', [['LS', 'LS (langzaam-snel)'], ['SS', 'SS (snel-snel)']], s.mpr.boorModusBlind))}
           ${row('Doorgaand boren', selectHTML('mp-boorModusDoor', [['LSL', 'LSL (langzaam-snel-langzaam)'], ['SSS', 'SSS (snel)']], s.mpr.boorModusDoor))}
           ${row('Extra diepte doorgaand', numHTML('mp-doorExtra', s.mpr.doorExtra))}
+          ${row('Boren met terugtrekken vanaf diepte', numHTML('mp-boorTerugGrens', s.mpr.boorTerugGrens))}
+          ${row('Vuldiepte', numHTML('mp-boorTerugVul', s.mpr.boorTerugVul))}
+          ${row('Terugtrekmaat', numHTML('mp-boorTerugMaat', s.mpr.boorTerugMaat))}
+          <div class="row"><span class="row-label">Boormodus-code (BM2)</span><div class="row-fill"><input class="input-num" id="mp-boorTerugModus" value="${esc(s.mpr.boorTerugModus)}"></div></div>
           <div class="row"><span class="row-label">Clamex als macro (lamello_p_system)</span>${toggleHTML('mp-clamex', s.mpr.clamex)}</div>
         </div><div class="group-footer">Gereedschapsnummers zoals in het gereedschapsbeheer van de P110. Boringen kiest woodWOP zelf op diameter; de app controleert of er een boor met die diameter en lengte is.</div></div>
         <div class="group"><div class="group-header"><span>Gereedschap P110</span><span id="tl-count"></span></div><div class="group-body" id="st-tools"></div>
@@ -2012,7 +2033,7 @@ const SettingsView = {
     for (const key of ['csvScheiding', 'csvDecimaal', 'methode']) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value; Store.save(); });
     for (const key of Object.keys(HPO_DEFAULTS)) $(`#nz-${key}`, v).addEventListener('change', e => { s.nest[key] = e.target.value.trim() || HPO_DEFAULTS[key]; Store.save(); });
     for (const key of Object.keys(MPR_DEFAULTS)) {
-      $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'clamex' ? e.target.checked : key === 'doorExtra' ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });
+      $(`#mp-${key}`, v)?.addEventListener('change', e => { s.mpr[key] = key === 'clamex' ? e.target.checked : ['doorExtra', 'boorTerugGrens', 'boorTerugVul', 'boorTerugMaat'].includes(key) ? Number(e.target.value) || 0 : e.target.value.trim(); Store.save(); });
     }
     for (const serie of SERIES) {
       s.blum[serie].types.forEach((ty, j) => {
