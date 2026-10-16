@@ -910,6 +910,12 @@ function openCabinet(project, k, selectId = null) {
         <div class="row"><span class="row-label">Zijpaneel links (afwerking)</span>${toggleHTML('f-zp-links', k.zijpaneel?.links)}</div>
         <div class="row"><span class="row-label">Zijpaneel rechts (afwerking)</span>${toggleHTML('f-zp-rechts', k.zijpaneel?.rechts)}</div>
         ${k.zijpaneel?.links || k.zijpaneel?.rechts ? row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${S().front} (front)`)) : ''}
+        ${row('Ronde kant', selectHTML('f-rondKant', [['', 'Geen'], ['links', 'Links'], ['rechts', 'Rechts']], k.rond?.kant ?? ''))}
+        ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)']], k.rond.vorm ?? 'kwart'))}
+          ${(k.rond.vorm ?? 'kwart') === 'kwart' ? row('Radius (buitenkant)', numHTML('f-rondRadius', k.rond.radius, '300')) : ''}
+          ${row('Uitvoering', selectHTML('f-rondUit', [['dicht', `Dicht: ribben + ${S().rondTriplexLagen} × buigtriplex + HPL`], ['open', 'Open: ronde legplanken']], k.rond.uitvoering ?? 'dicht'))}
+          ${k.rond.uitvoering === 'open' ? row('Ronde legplanken (tussen bodem en top)', numHTML('f-rondLeg', k.rond.legplanken, '2')) : row('HPL decor', decorSelectHTML('f-rondDecor', k.rond.decor ?? '', [['', 'Zoals de fronten']]))}
+          <div class="row"><span class="row-sub">De ronde kant komt buiten de zijwand (ribben met Clamex tegen de zijwand). Plint en werkblad lopen rond mee.</span></div>` : ''}
         ${row('Paslat links (breedte)', numHTML('f-paslat-links', k.paslat?.links, 'geen'))}
         ${row('Paslat rechts (breedte)', numHTML('f-paslat-rechts', k.paslat?.rechts, 'geen'))}
         ${row('Paslat boven (hoogte)', numHTML('f-paslat-boven', k.paslat?.boven, 'geen'))}
@@ -967,6 +973,12 @@ function openCabinet(project, k, selectId = null) {
     for (const [id, key] of [['f-usB', 'breedte'], ['f-usD', 'diepte']]) $(`#${id}`, form)?.addEventListener('input', e => { k.uitsparing = { ...(k.uitsparing ?? {}), [key]: e.target.value === '' ? null : Number(e.target.value), auto: false }; update(); });
     for (const kant of ['links', 'rechts']) $(`#f-zp-${kant}`, form)?.addEventListener('change', e => { k.zijpaneel = { ...(k.zijpaneel ?? {}), [kant]: e.target.checked }; renderForm(); update(); });
     $('#f-zijpaneelDikte', form)?.addEventListener('input', e => { k.zijpaneelDikte = e.target.value === '' ? null : Number(e.target.value); update(); });
+    $('#f-rondKant', form)?.addEventListener('change', e => { k.rond = e.target.value ? { vorm: 'kwart', uitvoering: 'dicht', ...(k.rond ?? {}), kant: e.target.value } : null; renderForm(); update(); });
+    $('#f-rondVorm', form)?.addEventListener('change', e => { k.rond = { ...k.rond, vorm: e.target.value }; renderForm(); update(); });
+    $('#f-rondUit', form)?.addEventListener('change', e => { k.rond = { ...k.rond, uitvoering: e.target.value }; renderForm(); update(); });
+    $('#f-rondRadius', form)?.addEventListener('input', e => { k.rond = { ...k.rond, radius: e.target.value === '' ? null : Number(e.target.value) }; update(); });
+    $('#f-rondLeg', form)?.addEventListener('input', e => { k.rond = { ...k.rond, legplanken: e.target.value === '' ? null : Number(e.target.value) }; update(); });
+    { const dec = $('#f-rondDecor', form); if (dec) bindDecor(dec, v => { k.rond = { ...k.rond, decor: v || null }; update(); }); }
     for (const kant of ['links', 'rechts', 'boven']) $(`#f-paslat-${kant}`, form)?.addEventListener('input', e => {
       k.paslat = { ...(k.paslat ?? {}), [kant]: e.target.value === '' ? null : Number(e.target.value) };
       update();
@@ -1589,7 +1601,7 @@ const stkLine = fields => fields.join(' ');
 const stkBoardType = r => {
   const N = { ...HPO_DEFAULTS, ...(S().nest ?? {}) };
   const type = r.plaattype ?? 'Melamine';
-  const tpl = type === 'HPL' ? N.hpoHpl : type === 'Trespa' ? N.hpoTrespa : N.hpoMelamine;
+  const tpl = type === 'HPL' ? N.hpoHpl : type === 'Trespa' ? N.hpoTrespa : type === 'Buigtriplex' ? N.hpoBuig : type === 'Multiplex' ? N.hpoMultiplex : N.hpoMelamine;
   return String(tpl || '{decor}').replace(/\{decor\}/gi, r.decor ?? '').replace(/\{dikte\}/gi, String(Math.round(Number(r.dikte) * 10) / 10));
 };
 
@@ -1874,6 +1886,7 @@ const SETTING_GROUPS = [
   ['Markeringen', [['pootRandZij', 'Stelpoot: vanaf zijkant bodem'], ['pootVoor', 'Stelpoot: vanaf voorkant'], ['pootAchter', 'Stelpoot: vanaf achterkant'], ['pootVierkant', 'Stelpoot: vierkant puntjes'], ['pootMiddenVoor', 'Middenpoot voor vanaf breedte'], ['pootMiddenAchter', 'Middenpoot achter vanaf breedte'], ['pootDia', 'Puntje Ø'], ['pootDiepte', 'Puntje diepte'], ['hoekMerkRand', 'Merk zijwand: vanaf onder/achter'], ['hoekMerkDia', 'Merk zijwand Ø'], ['hoekMerkDiepte', 'Merk zijwand diepte']]],
   ['Ladegeleiders', [['frontBevZij', 'Frontbevestiging: vanaf binnenkant zijwand'], ['frontBevDia', 'Frontbevestiging Ø'], ['frontBevDiepte', 'Frontbevestiging diepte'], ['geleiderDia', 'Punten geleider Ø (euroschroef)'], ['geleiderDiepte', 'Punten geleider diepte'], ['geleiderAchterVrij', 'Laatste punt min. voor einde geleider'], ['binnenladeOpvul', 'Binnenladen: dikte opvullijst'], ['opvulLengte', 'Opvullijst: lengte'], ['opvulHoogte', 'Opvullijst: hoogte'], ['opvulSchroeven', 'Opvullijst: schroeven per lijst'], ['binnenladeTerug', 'Binnenladen: binnenfront terug van voorkant'], ['binnenfrontExtra', 'Binnenfront: hoogte rug + '], ['binnenladeTussen', 'Binnenladen: ruimte ertussen'], ['ladeSponningBreedte', 'Bodem/rug: sponning breedte'], ['ladeSponningDiepte', 'Bodem/rug: sponning diepte'], ['ladeSchroefAfstand', 'Schroeven bodem in rug: afstand']]],
   ['Led-verlichting', [['ledBreedte', 'Breedte groef'], ['ledDiepte', 'Diepte groef'], ['ledAfstand', 'Standaard afstand tot rand'], ['ledKabelDia', 'Kabelgat Ø'], ['ledKabelAfstand', 'Kabelgat vanaf einde groef']]],
+  ['Ronde kant', [['rondTriplexLagen', 'Lagen buigtriplex'], ['rondTriplexDikte', 'Dikte buigtriplex'], ['rondHplDikte', 'Dikte HPL'], ['rondHplMinRadius', 'Kleinste buigradius HPL'], ['rondOvermaat', 'Overmaat vel per kant'], ['rondRibAfstand', 'Ribben om de'], ['rondStaanderBreedte', 'Breedte staander']]],
   ['Werkbladen in een hoek', [['werkbladHoekVerstek', 'Verstek vooraan (afgeronde kant)'], ['trekkerAantal', 'Tabletverbinders per hoek'], ['trekkerVoor', 'Eerste verbinder vanaf voorkant'], ['trekkerAchter', 'Laatste verbinder vanaf muur'], ['trekkerAfstand', 'Gat: hart tot de voeg'], ['trekkerDia', 'Gat Ø'], ['trekkerDiepte', 'Gat diepte'], ['trekkerSleuf', 'Sleuf breedte'], ['trekkerSleufDiepte', 'Sleuf diepte'], ['trekkerClamexVrij', 'Clamex minstens vanaf verbinder']]],
   ['Overige', [['regelBreedte', 'Breedte regels'], ['hangGreepUitsteek', 'Hangkast greeploos: front steekt onder uit'], ['paslatDiepte', 'Kastpaslat: diepte'], ['paslatSchroefAfstand', 'Paslat: schroeven om de'], ['trespaDikte', 'Trespa onder plint: dikte'], ['plintBakDikte', 'Plintenbak: dikte multiplex'], ['plintBakAfstand', 'Plintenbak: tussenlatten om de'], ['wegneembareRugHoogte', 'Spoelbak: wegneembare rug hoogte'], ['wegneembareRugAchter', 'Spoelbak: wegneembare rug vanaf achter'], ['latAfstand', 'Kolomkast: lat achter de rug om de'], ['latBreedte', 'Kolomkast: breedte lat'], ['rugInsprongToestel', 'Rug bij toestellen: afstand tot achterkant'], ['legplankDikGrens', 'Legplank dikker vanaf lengte'], ['legplankDik', 'Dikte lange legplank'], ['legplankInsprong', 'Legplank inspringing voor'], ['legplankSpeling', 'Legplank speling per kant'], ['plintInsprong', 'Plint inspringing'], ['greeplijstZaagExtra', 'Greeplijst samen zagen: extra per scheiding'], ['verluchtingInsprong', 'Verluchting: buitenste bodem/regel achteruit'], ['verluchtingSpleet', 'Verluchting: spleet']]],
 ];
@@ -1968,6 +1981,8 @@ const SettingsView = {
           <div class="row"><span class="row-label">HPO-plaattype melamine</span><div class="row-fill"><input class="input-plain" id="nz-hpoMelamine" value="${esc(s.nest.hpoMelamine ?? HPO_DEFAULTS.hpoMelamine)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype HPL</span><div class="row-fill"><input class="input-plain" id="nz-hpoHpl" value="${esc(s.nest.hpoHpl ?? HPO_DEFAULTS.hpoHpl)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype Trespa</span><div class="row-fill"><input class="input-plain" id="nz-hpoTrespa" value="${esc(s.nest.hpoTrespa ?? HPO_DEFAULTS.hpoTrespa)}"></div></div>
+          <div class="row"><span class="row-label">HPO-plaattype buigtriplex</span><div class="row-fill"><input class="input-plain" id="nz-hpoBuig" value="${esc(s.nest.hpoBuig ?? HPO_DEFAULTS.hpoBuig)}"></div></div>
+          <div class="row"><span class="row-label">HPO-plaattype multiplex</span><div class="row-fill"><input class="input-plain" id="nz-hpoMultiplex" value="${esc(s.nest.hpoMultiplex ?? HPO_DEFAULTS.hpoMultiplex)}"></div></div>
           ${row('Zaagplan', selectHTML('nz-methode', [['stroken', 'Logisch zagen (stroken)'], ['afval', 'Zo weinig mogelijk afval']], s.nest.methode ?? 'stroken'))}
           ${row('Strook opvullen met smaller stuk tot', numHTML('nz-stripVul', s.nest.stripVul ?? 50))}
           ${row('CSV: scheidingsteken', selectHTML('nz-csvScheiding', [[';', 'Puntkomma ;'], [',', 'Komma ,'], ['\t', 'Tab']], s.nest.csvScheiding ?? ';'))}

@@ -3,14 +3,15 @@
 // Methode: guillotine-schikking (vrije rechthoeken, "best short side fit", splitsen langs de kortste rest).
 // Plaatcoördinaten: X langs de lengte van de plaat (= nerf), Y langs de breedte.
 
-const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, trespaLengte: 3050, trespaBreedte: 1530, zaagsnede: 4, randafzaag: 10, stripVul: 50 };
+const NEST_DEFAULTS = { plaatLengte: 2800, plaatBreedte: 2070, hplLengte: 3050, hplBreedte: 1300, trespaLengte: 3050, trespaBreedte: 1530, buigLengte: 2500, buigBreedte: 1220, zaagsnede: 4, randafzaag: 10, stripVul: 50 };
 // Naam van het plaattype in de platendatabank van HPO (Schelling-zaag): {decor} en {dikte} worden ingevuld.
-const HPO_DEFAULTS = { hpoMelamine: 'MEL_{decor}_{dikte}', hpoHpl: 'OPG_{decor}_{dikte}', hpoTrespa: 'TRESPA_{dikte}' };
+const HPO_DEFAULTS = { hpoMelamine: 'MEL_{decor}_{dikte}', hpoHpl: 'OPG_{decor}_{dikte}', hpoTrespa: 'TRESPA_{dikte}', hpoBuig: 'BUIGTRIPLEX_{dikte}', hpoMultiplex: 'MULTIPLEX_{dikte}' };
 
 /** Plaatmaat volgens het plaattype: HPL heeft een eigen standaardformaat. */
 function sheetSize(N, plaattype) {
   if (plaattype === 'HPL') return { ...N, plaatLengte: N.hplLengte, plaatBreedte: N.hplBreedte };
   if (plaattype === 'Trespa') return { ...N, plaatLengte: N.trespaLengte ?? 3050, plaatBreedte: N.trespaBreedte ?? 1530 };
+  if (plaattype === 'Buigtriplex') return { ...N, plaatLengte: N.buigLengte ?? 2500, plaatBreedte: N.buigBreedte ?? 1220 };
   return N;
 }
 
@@ -47,7 +48,7 @@ function nestingItems(project, S, labelOf, kerf = 0) {
         current.fronts.push({ label, x: p.box.y, y: offset + p.box.x, L: c.L, B: c.B });
         continue;
       }
-      push(key, { label, L: c.L, B: c.B, rotate: !wood });
+      push(key, { label, L: c.L, B: c.B, rotate: !wood && !p.vasteRichting });   // buigtriplex: buigrichting vast
     }
     if (mode === 'nee') current = null;
     offset += W;
