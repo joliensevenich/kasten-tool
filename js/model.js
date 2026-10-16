@@ -1464,14 +1464,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const lat = add({ naam: lats.length > 1 ? `Lat achter de rug ${i + 1}` : 'Lat achter de rug', rol: 'lat', mat: 'korpus', dikte: latDik, grain: 'u', edges: {},
         box: { x: t, y: y0, z: zBack, w: W - 2 * t, h: lb, d: latDik }, uLen: W - 2 * t, vLen: lb });
       uprightJoin(lat, y0, lb, zBack + latDik / 2);
-      // De rug wordt in de lat geschroefd.
-      const rug = parts.find(x => x.rol === 'rug' && x.box.y <= yc && x.box.y + x.box.h >= yc);
-      if (rug && groef) {
-        for (const u of spreadPositions(W - 2 * t, S.rugSchroefAfstand, 50)) {
-          rug.ops.push({ kind: 'boring', face: 'achter', u: t + u - rug.box.x, v: yc - rug.box.y, dia: S.schroefDia, diepte: S.rug, doorgaand: true, naam: 'Schroef' });
-          count('Schroef');
-        }
-      }
+      // De lat houdt enkel de kast op maat: geen schroefgaten in de rug.
     });
   }
 
