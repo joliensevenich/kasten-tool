@@ -296,7 +296,7 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
   const D = p.dikte;
   const skipped = [];
   const sides = { A: [], B: [] };
-  const contours = [];
+  const contours = [], contoursB = [];
   const mitreSawn = new Set();
 
   // Zijde B: gespiegeld in Y (paneel om de X-as gekeerd).
@@ -341,9 +341,14 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       // De baan ligt een halve freesdiameter (of zaagdikte) aan de kant van het afval, zodat de maat klopt, en loopt
       // 20 mm voorbij beide uiteinden. Als laatste bewerking, zodat het stuk tijdens het boren heel blijft.
       // Een polylijn (bv. werkbladvoeg: verstek vooraan, dan recht) wordt altijd gefreesd.
-      const P = op.pts.map(q => fr.map(...q));
+      // Niet doorgaand (op.diepte, bv. een sponning): in het gekozen vlak, zonder uitloop voorbij de uiteinden (op.lead).
+      const blindC = Number(op.diepte) > 0 && op.diepte < D;
+      const onBc = blindC && op.face === fr.down;
+      const mpC = onBc ? mapB : fr.map;
+      const lead = op.lead ?? 20;
+      const P = op.pts.map(q => mpC(...q));
       const dirs = P.slice(1).map((q, i) => { const l = Math.hypot(q[0] - P[i][0], q[1] - P[i][1]) || 1; return [(q[0] - P[i][0]) / l, (q[1] - P[i][1]) / l]; });
-      const [wx, wy] = fr.map(...op.waste);
+      const [wx, wy] = mpC(...op.waste);
       const left = -dirs[0][1] * (wx - P[0][0]) + dirs[0][0] * (wy - P[0][1]) > 0;   // afval links van de baan?
       const frees = P.length > 2 || p.rol === 'rug' || p.rol === 'werkblad' || M.schuinMethode === 'frees';
       const tools = M.tools ?? P110_TOOLS;
@@ -358,7 +363,7 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       // Hoekpunten van de verschoven baan: snijpunt van de verschoven segmenten.
       const pathPts = [];
       const n0 = nrm(dirs[0]);
-      pathPts.push([P[0][0] + n0[0] - dirs[0][0] * 20, P[0][1] + n0[1] - dirs[0][1] * 20]);
+      pathPts.push([P[0][0] + n0[0] - dirs[0][0] * lead, P[0][1] + n0[1] - dirs[0][1] * lead]);
       for (let i = 1; i < P.length - 1; i++) {
         const d1 = dirs[i - 1], d2 = dirs[i], a1 = nrm(d1), a2 = nrm(d2);
         const q1 = [P[i][0] + a1[0], P[i][1] + a1[1]], q2 = [P[i][0] + a2[0], P[i][1] + a2[1]];
@@ -368,8 +373,9 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
         pathPts.push([q1[0] + d1[0] * tt, q1[1] + d1[1] * tt]);
       }
       const dl = dirs[dirs.length - 1], nl = nrm(dl), Pl = P[P.length - 1];
-      pathPts.push([Pl[0] + nl[0] + dl[0] * 20, Pl[1] + nl[1] + dl[1] * 20]);
-      const nr = contours.length + 1, z = -Number(M.contourDoor ?? 1);
+      pathPts.push([Pl[0] + nl[0] + dl[0] * lead, Pl[1] + nl[1] + dl[1] * lead]);
+      const list = onBc ? contoursB : contours;
+      const nr = list.length + 1, z = blindC ? D - op.diepte : -Number(M.contourDoor ?? 1);
       const el = (i, kind, [x, y], extra) => [`$E${i}`, kind, `X=${f3(x)}`, `Y=${f3(y)}`, `Z=${f3(z)}`, ...extra(x, y), ''].join('\r\n');
       const elems = [el(0, 'KP', pathPts[0], (x, y) => ['KO=00', `.X=${f3(x)}`, `.Y=${f3(y)}`, `.Z=${f3(z)}`, '.KO=00'])];
       for (let i = 1; i < pathPts.length; i++) {
@@ -377,7 +383,7 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
         const wi = (Math.atan2(qy - py, qx - px) + 2 * Math.PI) % (2 * Math.PI);
         elems.push(el(i, 'KL', pathPts[i], (x, y) => [`.X=${f3(x)}`, `.Y=${f3(y)}`, `.Z=${f3(z)}`, `.WI=${f3(wi)}`, '.WZ=0']));
       }
-      contours.push([`]${nr}`, ...elems].join('\r\n') + '\r\n' + (frees ? block('<105 \\Konturfraesen\\', {
+      list.push([`]${nr}`, ...elems].join('\r\n') + '\r\n' + (frees ? block('<105 \\Konturfraesen\\', {
         EA: `${nr}:0`, MDA: 'SEN', RK: 'NOWRK', EE: `${nr}:${pathPts.length - 1}`, MDE: 'SEN_AB', EM: '0', RI: '1',
         TNO: tno, SM: '0', S_: 'STANDARD', F_: '5', HP: '0', AB: '0', ZA: '@0',
       }) : block('<193 \\Kontursaegen\\', {
@@ -509,6 +515,7 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
   }
 
   sides.A.push(...contours);
+  sides.B.push(...contoursB);
   const files = [];
   const make = (ops, suffix) => files.push({ name: `${baseName}${suffix}.mpr`, text: mprHeader(fr.L, fr.B, D) + '\r\n' + ops.join('\r\n') + '!\r\n' });
   make(sides.A, sides.B.length ? '_A' : '');

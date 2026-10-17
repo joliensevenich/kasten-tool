@@ -129,8 +129,12 @@ const DEFAULT_SETTINGS = {
   rondHplDikte: 0.8,
   rondHplMinRadius: 150,     // kleinste buigradius van de HPL (waarschuwing)
   rondOvermaat: 20,          // vel: overmaat aan elke kant (na het verlijmen bijwerken)
-  rondRibAfstand: 400,       // ribben om de
-  rondStaanderBreedte: 40,
+  rondRibAfstand: 800,       // tussenribben om de (hoogstens)
+  rondRibVanaf: 1200,        // tussenribben pas vanaf deze kasthoogte
+  rondStaanderAfstand: 100,  // opstaanders langs de boog om de (hoogstens)
+  rondStaanderBreedte: 100,  // opstaander: breedte (18 × deze maat)
+  rondSponningBreedte: 14,   // sponning in de rechte stukken, top en bodem: breedte (= dikte buigtriplex)
+  rondSponningDiepte: 13,    // en diepte (zo ver gaat het buigtriplex erin)
   werkbladHoekVerstek: 12,   // werkbladen in een hoek: vooraan zoveel in verstek (afgeronde voorkant), de rest recht
   trekkerAantal: 2,          // tabletverbinders (werkbladtrekkers) per hoek
   trekkerVoor: 150,          // eerste vanaf de voorkant
@@ -1569,8 +1573,10 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   }
 
   // Ronde kant (links of rechts, buiten de zijwand): kwartrond op de voorhoek (radius R) of halfrond over de hele diepte.
-  // Dicht: liggende ribben (gefreesd, met Clamex tegen de zijwand), staanders aan de uiteinden van het vel, daarrond
-  // rondTriplexLagen × buigtriplex en één laag HPL. Open: de ribben zijn ronde legplanken (afplakken). Plint rond mee.
+  // Dicht: een volle plaat vlak tegen de kast (buitenkleur, zichtbaar als de deur opengaat; geen kantenband), volle top en bodem en bij
+  // een kwartrond een rechte zijkant tot de muur; sponningen (rondSponningBreedte × rondSponningDiepte) waar het
+  // buigtriplex (rondTriplexLagen × rondTriplexDikte) in komt; tussenribben; HPL over de boog. Clamex met deuvels (kan zicht zijn).
+  // Open: ronde bodem, top en legplanken met Clamex en deuvels. Plint en werkblad rond mee.
   const rd = k.rond;
   if (rd && (rd.kant === 'links' || rd.kant === 'rechts')) {
     const left = rd.kant === 'links';
@@ -1581,103 +1587,213 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const open = rd.uitvoering === 'open';
     const diep = zf - zBack;
     const R = half ? diep / 2 : Math.max(50, Math.min(Number(rd.radius) || Math.min(300, diep), diep));
-    const cz = zf - R;                                       // middelpunt van de boog (op het vlak van de zijwand)
+    const cx = open ? 0 : -t, cz = zf - R;                   // middelpunt van de boog (dicht: buitenvlak van de plaat tegen de kast)
     const a1 = half ? 1.5 * Math.PI : Math.PI;               // boog van 90° (voorkant) tot 180° (kwart) of 270° (half)
-    const huid = open ? 0 : S.rondTriplexLagen * S.rondTriplexDikte + S.rondHplDikte;
+    const hp = open ? 0 : S.rondHplDikte, ply = open ? 0 : S.rondTriplexLagen * S.rondTriplexDikte, sp = S.rondSponningDiepte;
+    const Ro = R - hp, Ri = Ro - ply;                        // buiten- en binnenkant van het buigtriplex
     if (k.zijpaneel?.[rd.kant]) warnings.push(`Ronde kant ${rd.kant}: er staat ook een zijpaneel aan die kant.`);
     if (!open && R < S.rondHplMinRadius) warnings.push(`Ronde kant: radius ${r1(R)} mm is kleiner dan de kleinste buigradius van de HPL (${S.rondHplMinRadius} mm).`);
-    // Omtrek op radius rr (vanaf de voorkant), met bij een kwartrond het rechte stuk tot tegen de muur.
+    if (!open && Math.abs(ply - S.rondSponningBreedte) > 0.5) warnings.push(`Ronde kant: de sponning (${S.rondSponningBreedte} mm) is niet even breed als het buigtriplex (${ply} mm).`);
     const nSeg = Math.max(6, Math.ceil((a1 - Math.PI / 2) / (Math.PI / 36)));
-    const arc = rr => Array.from({ length: nSeg + 1 }, (_, i) => { const a = Math.PI / 2 + (a1 - Math.PI / 2) * i / nSeg; return [rr * Math.cos(a), cz + rr * Math.sin(a)]; });
-    const tail = !half && cz > zBack + 0.5;
-    const devLen = rr => rr * (a1 - Math.PI / 2) + (tail ? cz - zBack : 0);
-    // Een vlak deel (rib, staander, vel) met een vorm in het bovenaanzicht (xl, z).
+    const arcC = (rr, ccx = cx) => Array.from({ length: nSeg + 1 }, (_, i) => { const a = Math.PI / 2 + (a1 - Math.PI / 2) * i / nSeg; return [ccx + rr * Math.cos(a), cz + rr * Math.sin(a)]; });
+    const arc = rr => arcC(rr);
+    const tail = !half && cz > zBack + sp + 5;              // kwartrond: recht stuk van de boog tot tegen de muur
+    // Een vlak deel met een vorm in het bovenaanzicht (xl, z).
     const shaped = (o, poly) => {
       const xs = poly.map(q => X(q[0])), zs = poly.map(q => q[1]);
       const bx = Math.min(...xs), bz = Math.min(...zs);
       return add({ ...o, box: { x: bx, y: o.y, z: bz, w: Math.max(...xs) - bx, h: o.h, d: Math.max(...zs) - bz },
         shape3d: { plane: 'xz', pts: poly.map(q => [X(q[0]) - bx, q[1] - bz]) } });
     };
-    // Ribben: onder (gelijk met de bodem), boven (gelijk met de top) en ertussen om de rondRibAfstand;
-    // open: bodem, top en rd.legplanken ronde legplanken ertussen.
-    const Rr = R - huid;
-    const nMid = open ? Math.max(0, Number(rd.legplanken ?? 2)) : Math.max(0, Math.ceil((H - t) / S.rondRibAfstand) - 1);
-    const ys = Array.from({ length: nMid + 2 }, (_, i) => i * (H - t) / (nMid + 1));
-    const ribPoly = half ? [[0, cz - Rr], [0, cz + Rr], ...arc(Rr).slice(1, -1)]
-      : [[0, zBack], [0, cz + Rr], ...arc(Rr).slice(1), ...(tail ? [[-Rr, zBack]] : [])];
-    const zA = half ? cz - Rr : zBack, zE = cz + Rr;        // rechte kant van de rib tegen de zijwand
-    const ribs = ys.map((y, i) => {
-      const rib = shaped({ naam: open ? (i === 0 ? 'Ronde bodem' : i === ys.length - 1 ? 'Ronde top' : 'Ronde legplank') : 'Rib ronde kant',
-        rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'u', edges: {}, y, h: t, bandRond: open ? S.bandLegplank : 0 }, ribPoly);
-      rib.uLen = rib.box.w; rib.vLen = rib.box.d;
-      const U = xl => X(xl) - rib.box.x, V = z => z - rib.box.z;
-      // Boog frezen (het rechte stuk ligt op de rand van het stuk).
-      const outer = arc(Rr);
-      rib.ops.push({ kind: 'contour', pts: outer.map(([xl, z]) => [U(xl), V(z)]), waste: [U(-Rr), V(half ? zE : zE)], naam: 'Ronde kant' });
-      // Clamex in de rechte kant van de rib en in het buitenvlak van de zijwand (alleen waar de zijwand is).
+    // Een staand recht stuk (rechthoek in het bovenaanzicht).
+    const panel = (o, x0, x1, z0, z1, y0, y1) => add({ ...o, dikte: t, grain: 'v', box: { x: Math.min(X(x0), X(x1)), y: y0, z: z0, w: Math.abs(X(x1) - X(x0)), h: y1 - y0, d: z1 - z0 } });
+    // Clamex met een deuvel aan weerszijden (zichtverbinding). Kant: edge/pos (positie langs de kant, binnen lo..hi);
+    // vlak: face/u/v, met dir = richting van de verbinding in (u, v).
+    const join2 = (ep, edge, pos, lo, hi, fp, face, u, v, dir) => {
+      ep.ops.push({ kind: 'clamex', edge, pos, naam: 'Clamex' });
+      fp.ops.push({ kind: 'clamex', face, u, v, dir, naam: 'Clamex' });
+      count('Lamello Clamex P-14');
+      for (const s of [-1, 1]) {
+        const d = s * S.clamexDeuvel;
+        if (pos + d < lo + 15 || pos + d > hi - 15) continue;
+        ep.ops.push({ kind: 'boring', edge, pos: pos + d, dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
+        fp.ops.push({ kind: 'boring', face, u: u + dir[0] * d, v: v + dir[1] * d, dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
+        count(`Deuvel ${S.deuvelDia} × ${S.deuvelLengte}`);
+      }
+    };
+    // Liggend deel (plaat of rib) tegen het buitenvlak van de zijwand: Clamex en deuvels langs de rechte kant (xl = 0).
+    const toSide = (hp2, y, zA, zE) => {
       const za = Math.max(zA, zBack), zb = Math.min(zE, zBack + sd.uLen);
-      if (zb - za > 40) for (const c of clamexPositions(zb - za, S)) {
+      if (zb - za < 40) return;
+      for (const c of clamexPositions(zb - za, S)) {
         const z = za + c;
-        rib.ops.push({ kind: 'clamex', edge: left ? 'u1' : 'u0', pos: V(z), naam: 'Clamex' });
-        sd.ops.push({ kind: 'clamex', face: 'buiten', u: sideU(z), v: sideV(y + t / 2), naam: 'Clamex (ronde kant)' });
-        count('Lamello Clamex P-14');
+        join2(hp2, left ? 'u1' : 'u0', z - hp2.box.z, za - hp2.box.z, zb - hp2.box.z, sd, 'buiten', sideU(z), sideV(y + t / 2), [1, 0]);
       }
-      return rib;
-    });
-    if (!open) {
-      // Staanders achter de uiteinden van het vel (tussen de ribben), om het vel op te lijmen en te nieten.
-      const sb = S.rondStaanderBreedte;
-      const posts = [[[-sb, zf - huid - t], [0, zf - huid - t], [0, zf - huid], [-sb, zf - huid]]];
-      if (half) posts.push([[-sb, zBack + huid], [0, zBack + huid], [0, zBack + huid + t], [-sb, zBack + huid + t]]);
-      else if (tail) posts.push([[-Rr, zBack], [-Rr + t, zBack], [-Rr + t, zBack + sb], [-Rr, zBack + sb]]);
-      for (let i = 0; i + 1 < ribs.length; i++) for (const pp of posts) {
-        const y0 = ys[i] + t, hh = ys[i + 1] - ys[i] - t;
-        const st = shaped({ naam: 'Staander ronde kant', rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'v', edges: {}, y: y0, h: hh }, pp);
-        st.uLen = Math.max(st.box.w, st.box.d); st.vLen = hh;
+    };
+    const plateIn = (pl, xl, z) => [X(xl) - pl.box.x, z - pl.box.z];
+    const ribs = [];
+    if (open) {
+      // Open: ronde bodem, top en legplanken ertussen (radius R tot aan de zijwand), kanten afplakken.
+      const nMid = Math.max(0, Number(rd.legplanken ?? 2));
+      const ys = Array.from({ length: nMid + 2 }, (_, i) => i * (H - t) / (nMid + 1));
+      const poly = half ? [[0, cz - R], [0, cz + R], ...arc(R).slice(1, -1)] : [[0, zBack], [0, cz + R], ...arc(R).slice(1), ...(tail ? [[-R, zBack]] : [])];
+      ys.forEach((y, i) => {
+        const rib = shaped({ naam: i === 0 ? 'Ronde bodem' : i === ys.length - 1 ? 'Ronde top' : 'Ronde legplank', rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'u', edges: {}, y, h: t, bandRond: S.bandLegplank }, poly);
+        rib.uLen = rib.box.w; rib.vLen = rib.box.d;
+        rib.ops.push({ kind: 'contour', pts: arc(R).map(q => plateIn(rib, ...q)), waste: plateIn(rib, -R, cz + R), naam: 'Ronde kant' });
+        toSide(rib, y, half ? cz - R : zBack, cz + R);
+        ribs.push(rib);
+      });
+    } else {
+      // Dicht. Top en bodem: volle platen tot de buitenkant van het buigtriplex; sponning langs de boog aan de binnenkant.
+      const zFS = zf - hp, zBS = zBack + hp;                 // buitenvlak van de strook vooraan / achteraan
+      const platePoly = half ? [[0, zBS], [0, zFS], [cx, zFS], ...arc(Ro).slice(1)]
+        : [[0, zBack], [0, zFS], [cx, zFS], ...arc(Ro).slice(1), ...(tail ? [[cx - Ro, zBack]] : [])];
+      // Sponning: binnenrand op Ri, vooraan (en achteraan) recht door tot sp in de rechte stukken.
+      const tr = 9;                                          // halve diameter van de contourfrees (einde van de sponning)
+      const rabbet = [[cx + sp - tr, cz + Ri], ...arc(Ri), ...(half ? [[cx + sp - tr, cz - Ri]] : tail ? [[cx - Ri, cz - sp + tr]] : [])];
+      for (const [y, face, nm] of [[0, 'boven', 'Ronde bodem'], [H - t, 'onder', 'Ronde top']]) {
+        const pl = shaped({ naam: nm, rol: 'rondrib', mat: 'rond', dikte: t, grain: 'u', edges: {}, y, h: t }, platePoly);
+        pl.uLen = pl.box.w; pl.vLen = pl.box.d;
+        pl.ops.push({ kind: 'contour', face, diepte: sp, lead: 0, pts: rabbet.map(q => plateIn(pl, ...q)), waste: plateIn(pl, cx - Ro - 20, cz + Ro + 20), naam: 'Sponning buigtriplex' });
+        pl.ops.push({ kind: 'contour', pts: arc(Ro).map(q => plateIn(pl, ...q)), waste: plateIn(pl, cx - Ro, zFS), naam: 'Ronde kant' });
+        toSide(pl, y, half ? zBS : zBack, zFS);
+        ribs.push(pl);
       }
-      // Vel: lagen buigtriplex en HPL, afgewikkelde lengte op hun middenradius plus overmaat aan elke kant.
-      const band = (r0, r2) => [...arc(r2), ...(tail ? [[-r2, zBack], [-r0, zBack]] : []), ...arc(r0).reverse()];
+      const [bot, top] = ribs;
+      // Plaat vlak tegen de kast (volle plaat, buitenkleur) tussen bodem en top; vooraan (en bij halfrond achteraan) een
+      // sponning in het buitenvlak: rondSponningBreedte breed (vanaf de kant) en rondSponningDiepte diep, voor het buigtriplex.
+      const zP0 = half ? zBS : zBack, zP1 = zFS;
+      const inner = panel({ naam: 'Plaat ronde kant (tegen de kast)', rol: 'rondstrook', mat: 'rond', edges: {} }, cx, 0, zP0, zP1, t, H - t);
+      inner.uLen = zP1 - zP0; inner.vLen = H - 2 * t;
+      const sb = S.rondSponningBreedte;
+      const rabbetAt = (uEdge, dirIn) => inner.ops.push({ kind: 'groef', face: 'voor', frees: true, u1: uEdge + dirIn * (sb - 10) / 2, v1: -10, u2: uEdge + dirIn * (sb - 10) / 2, v2: inner.vLen + 10, breedte: sb + 10, diepte: sp, naam: 'Sponning buigtriplex' });
+      rabbetAt(inner.uLen, -1);
+      if (half) rabbetAt(0, 1);
+      // Rechte zijkant tot tegen de muur (kwartrond), met een sponning vooraan waar het buigtriplex in het vlak in komt.
+      const straight = [{ p: inner, along: 'z', xc: cx / 2, z0: zP0 }];
+      if (tail) {
+        const ts = panel({ naam: 'Rechte zijkant ronde kant', rol: 'rondstrook', mat: 'rond', edges: {} }, cx - Ro, cx - Ro + t, zBack, cz, t, H - t);
+        ts.uLen = cz - zBack; ts.vLen = H - 2 * t;
+        const uc = ts.uLen - (sp - 10) / 2;
+        ts.ops.push({ kind: 'groef', face: 'voor', frees: true, u1: uc, v1: -10, u2: uc, v2: ts.vLen + 10, breedte: sp + 10, diepte: sb, naam: 'Sponning buigtriplex' });
+        straight.push({ p: ts, along: 'z', xc: cx - Ro + t / 2, z0: zBack });
+      }
+      // Plaat tegen de muur (kwartrond): achteraan tussen de plaat tegen de kast en de rechte zijkant (of de boog).
+      const xW0 = tail ? cx - Ro + t : cx - Ri;
+      let backP = null;
+      if (!half && cx - xW0 > 40) {
+        backP = panel({ naam: 'Plaat tegen de muur ronde kant', rol: 'rondstrook', mat: 'korpus', edges: {} }, xW0, cx, zBack, zBack + t, t, H - t);
+        backP.uLen = cx - xW0; backP.vLen = H - 2 * t;
+        straight.push({ p: backP, along: 'x', x0: xW0, zc: zBack + t / 2 });
+      }
+      // Clamex en deuvels in de onder- en bovenkant van de rechte stukken, in de bodem en de top.
+      for (const st of straight) {
+        const p2 = st.p;
+        for (const c of clamexPositions(p2.uLen, S)) {
+          for (const [edge, pl, face] of [['v0', bot, 'boven'], ['v1', top, 'onder']]) {
+            if (st.along === 'x') {
+              const xx = X(st.x0 + c);
+              join2(p2, edge, xx - p2.box.x, 0, p2.uLen, pl, face, xx - pl.box.x, st.zc - pl.box.z, [1, 0]);
+            } else join2(p2, edge, c, 0, p2.uLen, pl, face, X(st.xc) - pl.box.x, st.z0 + c - pl.box.z, [0, 1]);
+          }
+        }
+      }
+      // Tussenribben (pas vanaf rondRibVanaf hoog, om de rondRibAfstand): tussen de plaat tegen de kast en het buigtriplex, met Clamex en deuvels
+      // tegen het buitenvlak van die plaat.
+      const nMid = H >= S.rondRibVanaf ? Math.max(0, Math.ceil((H - t) / S.rondRibAfstand) - 1) : 0;
+      const xT = cx - Ro + t;                                // binnenvlak van de rechte zijkant
+      const zR0 = backP ? zBack + t : zBack;                // achter de plaat tegen de muur
+      const ribPoly = half ? [[cx, cz - Ri], [cx, cz + Ri], ...arc(Ri).slice(1, -1)]
+        : [[cx, zR0], [cx, cz + Ri], ...arc(Ri).slice(1), ...(tail ? [[xT, cz], [xT, zR0]] : [])];
+      const ribCut = half ? arc(Ri) : [...arc(Ri), ...(tail ? [[xT, cz], [xT, zR0]] : [])];
+      const ribYs = [];
+      for (let i = 1; i <= nMid; i++) {
+        const y = i * (H - t) / (nMid + 1);
+        ribYs.push(y);
+        const rib = shaped({ naam: 'Rib ronde kant', rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'u', edges: {}, y, h: t }, ribPoly);
+        rib.uLen = rib.box.w; rib.vLen = rib.box.d;
+        rib.ops.push({ kind: 'contour', pts: ribCut.map(q => plateIn(rib, ...q)), waste: plateIn(rib, cx - Ro, zFS), naam: 'Ronde kant' });
+        const za = half ? cz - Ri : zR0, zb = cz + Ri;
+        for (const c of clamexPositions(zb - za - 30, S)) {
+          const z = za + 15 + c;
+          join2(rib, left ? 'u1' : 'u0', z - rib.box.z, za - rib.box.z, zb - rib.box.z, inner, 'voor', z - inner.box.z, y + t / 2 - inner.box.y, [1, 0]);
+        }
+      }
+      // Opstaanders langs de boog, net binnen het buigtriplex, om het buigtriplex op te lijmen en te nieten:
+      // om de ± rondStaanderAfstand, tussen bodem, ribben en top, met twee deuvels aan elk uiteinde (+ lijm), zodat het stuk niet draait.
+      {
+        const da = a1 - Math.PI / 2, n = Math.max(1, Math.ceil(Ri * da / S.rondStaanderAfstand) - 1);
+        const levels = [0, ...ribYs, H - t];
+        const sdp = S.rondStaanderBreedte, hw = t / 2;
+        const ribParts = parts.filter(x => x.naam === 'Rib ronde kant' && ribYs.includes(x.box.y));
+        const levelPart = y => (y === 0 ? bot : y === H - t ? top : ribParts.find(x => Math.abs(x.box.y - y) < 0.5));
+        for (let j = 1; j <= n; j++) {
+          const a = Math.PI / 2 + da * j / (n + 1), ca = Math.cos(a), sa = Math.sin(a), tx = -sa, tz = ca;
+          const r0 = Ri - sdp, r2 = Ri;
+          const quad = [[cx + r0 * ca - hw * tx, cz + r0 * sa - hw * tz], [cx + r2 * ca - hw * tx, cz + r2 * sa - hw * tz],
+            [cx + r2 * ca + hw * tx, cz + r2 * sa + hw * tz], [cx + r0 * ca + hw * tx, cz + r0 * sa + hw * tz]];
+          // Twee deuvels per uiteinde (één laat het stuk draaien), op een kwart en driekwart van de breedte.
+          const dws = [sdp * 0.25, sdp * 0.75].map(d => ({ d, pt: [cx + (Ri - sdp + d) * ca, cz + (Ri - sdp + d) * sa] }));
+          for (let i = 0; i + 1 < levels.length; i++) {
+            const y0 = levels[i] + t, hh = levels[i + 1] - levels[i] - t;
+            const stp = shaped({ naam: 'Opstaander ronde kant', rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'v', edges: {}, y: y0, h: hh }, quad);
+            stp.uLen = sdp; stp.vLen = hh;
+            for (const [edge, lv, face] of [['v0', levelPart(levels[i]), 'boven'], ['v1', levelPart(levels[i + 1]), 'onder']]) {
+              if (!lv) continue;
+              for (const { d, pt } of dws) {
+                stp.ops.push({ kind: 'boring', edge, pos: d, dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
+                lv.ops.push({ kind: 'boring', face, u: X(pt[0]) - lv.box.x, v: pt[1] - lv.box.z, dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
+                count(`Deuvel ${S.deuvelDia} × ${S.deuvelLengte}`);
+              }
+            }
+          }
+        }
+      }
+      // Buigtriplex: in de sponningen van bodem en top (sp diep) en van de rechte stukken; op maat (afgewikkeld).
+      const ends = rr => [[cx + sp, cz + rr], ...arc(rr), ...(half ? [[cx + sp, cz - rr]] : tail ? [[cx - rr, cz - sp]] : [])];   // sp in de sponningen
+      const band = (r0, r2) => [...ends(r2), ...ends(r0).reverse()];
+      const devLen = rr => rr * (a1 - Math.PI / 2) + sp + (half || tail ? sp : 0);
       for (let i = 0; i < S.rondTriplexLagen; i++) {
-        const r0 = Rr + i * S.rondTriplexDikte, r2 = r0 + S.rondTriplexDikte;
+        const r0 = Ri + i * S.rondTriplexDikte, r2 = r0 + S.rondTriplexDikte;
         const v = shaped({ naam: `Buigtriplex ronde kant (laag ${i + 1})`, rol: 'rondhuid', mat: 'buig', dikte: S.rondTriplexDikte, grain: 'u', edges: {},
-          decor: 'Buigtriplex', plaattype: 'Buigtriplex', vasteRichting: true, y: 0, h: H, kleurVast: '#d8b98a' }, band(r0, r2));
-        v.uLen = devLen((r0 + r2) / 2) + 2 * S.rondOvermaat; v.vLen = H + S.rondOvermaat;
+          vasteRichting: true, y: t - sp, h: H - 2 * (t - sp), kleurVast: '#d8b98a' }, band(r0, r2));
+        v.uLen = devLen((r0 + r2) / 2); v.vLen = H - 2 * (t - sp);
       }
-      const rH = R - S.rondHplDikte;
-      const hpl = shaped({ naam: 'HPL ronde kant', rol: 'rondhuid', mat: 'hpl', dikte: S.rondHplDikte, grain: 'u', edges: {}, nietZagen: true,
-        decor: rd.decor || k.decorFront || S.decorFront, plaattype: 'HPL', y: 0, h: H }, band(rH, R));
-      hpl.uLen = devLen(R - S.rondHplDikte / 2) + 2 * S.rondOvermaat; hpl.vLen = H + S.rondOvermaat;
-      order(`HPL ${hpl.decor} ${S.rondHplDikte} mm voor ronde kant: ${Math.round(hpl.uLen)} × ${Math.round(hpl.vLen)}`, 1);
-      count('Buigtriplex en HPL: lijm (contactlijm / PU)', 1);
+      // HPL: over de boog, over de rest van de plaat tegen de kast voor de sponning (t − sp) tot tegen de kast, en bij een
+      // kwartrond ook over de rechte zijkant tot tegen de muur.
+      const endsH = rr => [[0, cz + rr], ...arc(rr), ...(half ? [[0, cz - rr]] : tail ? [[cx - rr, zBack]] : [])];
+      const hpl = shaped({ naam: 'HPL ronde kant', rol: 'rondhuid', mat: 'hpl', dikte: hp, grain: 'u', edges: {}, nietZagen: true, y: 0, h: H }, [...endsH(R), ...endsH(Ro).reverse()]);
+      hpl.uLen = (R - hp / 2) * (a1 - Math.PI / 2) - cx * (half ? 2 : 1) + (tail ? cz - zBack : 0) + 2 * S.rondOvermaat; hpl.vLen = H + S.rondOvermaat;
+      order(`HPL ${rd.decor || k.decorFront || S.decorFront} ${hp} mm voor ronde kant: ${Math.round(hpl.uLen)} × ${Math.round(hpl.vLen)}`, 1);
     }
-    // Plint rond mee: zelfde opbouw (buigtriplex + HPL) op de radius van het plintvlak, op twee plintribben.
+    // Plint rond mee: buigtriplex + HPL op de radius van het plintvlak, op twee plintribben (zelfde middelpunt).
     if (P > 0 && k.plint !== 'geen') {
       const zPf = D - S.plintInsprong;                      // voorvlak van de plint
       const Rp = R - (zf - zPf);
       if (Rp > 30) {
-        const hp = S.rondTriplexLagen * S.rondTriplexDikte + S.rondHplDikte, Rpr = Rp - hp;
-        const arcP = rr => Array.from({ length: nSeg + 1 }, (_, i) => { const a = Math.PI / 2 + (a1 - Math.PI / 2) * i / nSeg; return [rr * Math.cos(a), cz + rr * Math.sin(a)]; });
-        const pPoly = half ? [[0, cz - Rpr], [0, cz + Rpr], ...arcP(Rpr).slice(1, -1)] : [[0, zBack], [0, cz + Rpr], ...arcP(Rpr).slice(1), ...(tail ? [[-Rpr, zBack]] : [])];
+        const hpp = S.rondTriplexLagen * S.rondTriplexDikte + S.rondHplDikte, Rpr = Rp - hpp;
+        const pPoly = half ? [[0, cz - Rpr], [0, cz + Rpr], [cx, cz + Rpr], ...arc(Rpr).slice(1, -1), [cx, cz - Rpr]]
+          : [[0, zBack], [0, cz + Rpr], [cx, cz + Rpr], ...arc(Rpr).slice(1), ...(tail ? [[cx - Rpr, zBack]] : [])];
         for (const y of [-P, -S.plintBakDikte]) {
           const pr = shaped({ naam: 'Plintrib ronde kant', rol: 'plintbak', mat: 'korpus', dikte: S.plintBakDikte, grain: 'u', edges: {}, decor: 'Multiplex', plaattype: 'Multiplex', y, h: S.plintBakDikte }, pPoly);
           pr.uLen = pr.box.w; pr.vLen = pr.box.d;
-          pr.ops.push({ kind: 'contour', pts: arcP(Rpr).map(([xl, z]) => [X(xl) - pr.box.x, z - pr.box.z]), waste: [X(-Rpr) - pr.box.x, cz + Rpr - pr.box.z], naam: 'Ronde kant' });
+          pr.ops.push({ kind: 'contour', pts: arc(Rpr).map(q => plateIn(pr, ...q)), waste: plateIn(pr, cx - Rpr, cz + Rpr), naam: 'Ronde kant' });
         }
-        const bandP = (r0, r2) => [...arcP(r2), ...(tail ? [[-r2, zBack], [-r0, zBack]] : []), ...arcP(r0).reverse()];
-        const devP = rr => rr * (a1 - Math.PI / 2) + (tail ? cz - zBack : 0);
+        const bandP = (r0, r2) => [[0, cz + r2], ...arc(r2), ...(tail ? [[cx - r2, zBack], [cx - r0, zBack]] : half ? [[0, cz - r2], [0, cz - r0]] : []), ...arc(r0).reverse(), [0, cz + r0]];
+        const devP = rr => rr * (a1 - Math.PI / 2) - cx * (half ? 2 : 1) + (tail ? cz - zBack : 0);
         for (let i = 0; i < S.rondTriplexLagen; i++) {
           const r0 = Rpr + i * S.rondTriplexDikte, r2 = r0 + S.rondTriplexDikte;
           const v = shaped({ naam: `Buigtriplex ronde plint (laag ${i + 1})`, rol: 'rondhuid', mat: 'buig', dikte: S.rondTriplexDikte, grain: 'u', edges: {},
-            decor: 'Buigtriplex', plaattype: 'Buigtriplex', vasteRichting: true, y: -P, h: P, kleurVast: '#d8b98a' }, bandP(r0, r2));
+            vasteRichting: true, y: -P, h: P, kleurVast: '#d8b98a' }, bandP(r0, r2));
           v.uLen = devP((r0 + r2) / 2) + 2 * S.rondOvermaat; v.vLen = P + S.rondOvermaat;
         }
-        const hpP = shaped({ naam: 'HPL ronde plint', rol: 'rondhuid', mat: 'hpl', dikte: S.rondHplDikte, grain: 'u', edges: {}, nietZagen: true,
-          decor: rd.decor || k.decorFront || S.decorFront, plaattype: 'HPL', y: -P, h: P }, bandP(Rp - S.rondHplDikte, Rp));
+        const hpP = shaped({ naam: 'HPL ronde plint', rol: 'rondhuid', mat: 'hpl', dikte: S.rondHplDikte, grain: 'u', edges: {}, nietZagen: true, y: -P, h: P }, bandP(Rp - S.rondHplDikte, Rp));
         hpP.uLen = devP(Rp) + 2 * S.rondOvermaat; hpP.vLen = P + S.rondOvermaat;
-        order(`HPL ${hpP.decor} ${S.rondHplDikte} mm voor ronde plint: ${Math.round(hpP.uLen)} × ${Math.round(hpP.vLen)}`, 1);
+        order(`HPL ${rd.decor || k.decorFront || S.decorFront} ${S.rondHplDikte} mm voor ronde plint: ${Math.round(hpP.uLen)} × ${Math.round(hpP.vLen)}`, 1);
       }
     }
-    warnings.push(`Ronde kant ${rd.kant}: ${half ? 'halfrond' : `kwartrond R ${r1(R)}`}, ${open ? 'open met ronde legplanken' : `dicht (${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL)`}. Kies buigtriplex dat in de juiste richting buigt (rond een staande as).`);
+    warnings.push(`Ronde kant ${rd.kant}: ${half ? 'halfrond' : `kwartrond R ${r1(R)}`}, ${open ? 'open met ronde legplanken' : `dicht: plaat tegen de kast, ${half ? '' : 'plaat tegen de muur, '}top, bodem${tail ? ' en rechte zijkant' : ''} vol met sponning ${S.rondSponningBreedte} × ${sp}, ${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL`}. Kies buigtriplex dat rond een staande as buigt.`);
   }
 
   // Paslat boven (bv. tot het plafond): frontpaslat boven de fronten over de volle breedte (ook over de paslatten
@@ -2275,8 +2391,9 @@ function werkbladGeometry(project, S) {
     for (const [c, kant] of [[first, 'links'], [last, 'rechts']]) {
       const rd = c.k.rond;
       if (rd?.kant !== kant) continue;
-      const xc = kant === 'links' ? c.x : c.x + Number(c.k.breedte);
       const sg = kant === 'links' ? -1 : 1;
+      // Middelpunt van de boog: buiten de zijwand, voorbij de rechte strook (dicht).
+      const xc = (kant === 'links' ? c.x : c.x + Number(c.k.breedte)) + sg * (rd.uitvoering === 'open' ? 0 : S.plaat);
       const zf = c.z + Number(c.k.diepte) + (c.k.front === 'inliggend' ? 0 : fd), diep = zf - c.z;
       const n = 24;
       let pts, arc;
@@ -2512,6 +2629,7 @@ function partBaseType(k, S, p) {
   if (p.mat === 'trespa') return 'Trespa';
   if (p.mat === 'buig') return 'Buigtriplex';
   if (p.mat === 'hpl') return 'HPL';
+  if (p.mat === 'rond') return k.frontMateriaal || S.frontMateriaal || 'Melamine';
   if (p.rol === 'plintbak') return 'Multiplex';
   return p.mat === 'front' || p.rol === 'plint' ? (k.frontMateriaal || S.frontMateriaal || 'Melamine') : 'Melamine';
 }
@@ -2521,7 +2639,7 @@ function partBaseDecor(k, S, p) {
   const dKorpus = k.decorKorpus || S.decorKorpus;
   if (p.mat === 'trespa') return 'Trespa';
   if (p.mat === 'buig') return 'Buigtriplex';
-  if (p.mat === 'hpl') return k.rond?.decor || k.decorFront || S.decorFront;
+  if (p.mat === 'hpl' || p.mat === 'rond') return k.rond?.decor || k.decorFront || S.decorFront;
   if (p.rol === 'plintbak') return 'Multiplex';
   if (p.mat === 'front' || p.rol === 'plint') return k.decorFront || S.decorFront;
   if (p.mat === 'rug') return k.decorRug || dKorpus;
