@@ -192,7 +192,8 @@ const Projects = {
     $('#pj-wand', v).addEventListener('click', () => openWallBuilder(p, () => { this.renderProject(); }));
     $('#pj-schets', v).addEventListener('click', () => openSketchImport(p, made => {
       this.keepCamera = false; this.renderProject();
-      if (made.length) alertBox(`${made.length} ${made.length === 1 ? 'kast' : 'kasten'} gemaakt`, 'Kijk ze na en pas de details aan zoals altijd (tik op een kast). Een tweede wand staat ernaast: zet hem met Verplaatsen in de hoek. Niet goed? Stap terug met ↶.');
+      if (made.length) alertBox(`${made.length} ${made.length === 1 ? 'kast' : 'kasten'} gemaakt`, 'Kijk ze na en pas de details aan zoals altijd (tik op een kast). Een tweede wand staat ernaast: zet hem met Verplaatsen in de hoek. Niet goed? Stap terug met ↶.'
+        + (made.nieuweTypes?.length ? ` Nieuwe kasttypes bewaard (bij "Kast toevoegen", in elk project): ${made.nieuweTypes.join(', ')}.` : ''));
     }));
     $('#pj-select', v)?.addEventListener('click', () => { this.selectMode = !this.selectMode; this.selected = new Set(); this.keepCamera = true; this.renderProject(); });
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));

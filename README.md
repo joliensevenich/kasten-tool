@@ -38,6 +38,11 @@ met de maten erbij en per kast een code of gewone woorden. Het voorbeeldblad met
 `voorbeelden/Schets voorbeeld.pdf`. Claude leest de foto; je krijgt eerst een lijst om na te kijken, daarna worden het gewone
 kasten die je aanpast zoals altijd (niet goed: ↶ zet alles terug).
 
+Ook ronde kanten (R300 = kwartrond, HR = halfrond, KOP = eilandkop, GOLF/DRUPPEL = vrije vorm, ROPEN = open), eilanden
+met kasten rug aan rug (EILAND, de achterkant apart getekend) en verticale verdelingen (|3 of |400|200) worden gelezen.
+Een kast die niet in de lijst staat, teken je met haar vakken en een naam (bv. "tv-meubel"): de app maakt ze en bewaart
+ze als eigen kasttype.
+
 ### API-sleutel aanmaken
 
 Het lezen gebeurt met de Claude API van Anthropic. Daarvoor heb je een eigen API-sleutel nodig (los van een Claude-abonnement).
