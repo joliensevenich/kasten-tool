@@ -153,6 +153,9 @@ select.picker { -webkit-appearance: none; appearance: none; border: 0; backgroun
 .panel-svg .pnl { fill: #f3ead8; stroke: #6b5a40; }
 .panel-svg .band { stroke: #3b3226; }
 .decor-row { gap: 6px; }
+.vorm-knop { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 72px; padding: 6px 4px; border: 1px solid var(--sep, #d0d0d5); border-radius: 10px; background: var(--card, #fff); color: var(--accent, #0a64d8); font-size: 12px; }
+.vorm-knop svg { width: 36px; height: 56px; display: block; }
+.vorm-knop.actief { border: 2px solid var(--accent, #0a64d8); background: rgba(10, 100, 216, 0.08); }
 .decor-row .code { width: 62px; flex: none; font-weight: 600; }
 .decor-row .naam { flex: 1 1 0; min-width: 0; }
 .decor-row .hpo { width: 76px; flex: none; font-size: 0.85em; }
@@ -285,6 +288,7 @@ table.cut .n { text-align: right; }
 <script src="js/core.js" defer></script>
 <script src="js/viewer.js" defer></script>
 <script src="js/drawing.js" defer></script>
+<script src="js/schets.js" defer></script>
 <script src="js/app.js" defer></script>
 </body>
 </html>

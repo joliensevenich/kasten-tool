@@ -266,7 +266,8 @@ const PRESETS = [
   { id: 'boven-deuren', naam: 'Bovenkast met deuren', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('deur', { legplanken: 2 })] } },
   { id: 'boven-klep', naam: 'Bovenkast met klepdeur', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('klep', { legplanken: 1 })] } },
   { id: 'boven-dampkap', naam: 'Bovenkast boven dampkap', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('deur')] } },
-  { id: 'open', naam: 'Open kast', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('open', { legplanken: 2 })] } },
+  // Verborgen (vervangen door de optie "Zonder fronten" bij elke kast); blijft voor bestaande projecten.
+  { id: 'open', naam: 'Open kast', groep: 'Bovenkasten', verborgen: true, kast: { plint: 'geen', top: 'vol', secties: [sec('open', { legplanken: 2 })] } },
 ];
 
 function newCabinet(presetId) {
@@ -333,9 +334,9 @@ function spreadPositions(len, step, marge) {
 /** Vormen: uitsteek als factor van de grootste uitsteek, langs de diepte s (0 = voorkant, 1 = achterkant). */
 const VRIJE_VORMEN = {
   ellips: { naam: 'Ellips', m: () => 1 },
-  golf: { naam: 'Golf', m: s => 0.9 + 0.1 * Math.cos(4 * Math.PI * (s - 0.5)) },
+  golf: { naam: 'Golf', m: s => 0.92 + 0.08 * Math.cos(4 * Math.PI * (s - 0.25)) },
   druppel: { naam: 'Druppel', m: s => 0.62 + 0.45 * Math.pow(1 - s, 1.3) },
-  s: { naam: 'S-bocht', m: s => 0.78 + 0.22 * Math.sin(2 * Math.PI * s) },
+  s: { naam: 'S-bocht', m: s => 0.84 + 0.16 * Math.sin(2 * Math.PI * s) },
 };
 /**
  * Omtrek van een vrije vorm (buitenkant, zonder dikte) van vooraan (cx, zF) naar achteraan (cx, zB): x = cx − A·f(s).
@@ -429,9 +430,19 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     k = { ...k, deuren: '1', scharnierKant: rechtsHoog ? 'rechts' : 'links', blindBreedte: 0, secties: (k.secties ?? []).map(x => ({ ...x, legplanken: 0 })) };
   }
 
+  // Zonder fronten (open kast): deur-, klep- en ladevakken worden open vakken (legplanken, stijlen en vaste legplanken
+  // blijven), geen greep, geen blinde hoek; paslatten komen gelijk met de voorkant van het korpus.
+  const zonderFronten = !!k.zonderFronten;
+  if (zonderFronten) {
+    k = { ...k, greep: 'geen', front: 'opliggend', uitstekOnder: 0, uitstekBoven: 0, blindBreedte: 0,
+      secties: (k.secties ?? []).map(x => ['deur', 'klep', 'lade'].includes(x.type) ? { ...x, type: 'open', legplanken: x.type === 'lade' ? 0 : x.legplanken } : x),
+      rond: k.rond?.nis?.aan ? { ...k.rond, nis: { ...k.rond.nis, inhoud: 'open' } } : k.rond };
+  }
+
   const t = S.plaat;
   const v = S.voeg;
   const fd = S.front;
+  const zFP = zonderFronten ? D - fd : D;                  // achterkant van de frontpaslatten (voorvlak − dikte)
   const warnings = [...preWarnings];
   const parts = [];
   const hw = {};
@@ -1522,9 +1533,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const left = kant === 'links';
     const sd = left ? sideL : sideR;
     const xf = left ? -v / 2 - pw : W + v / 2;
-    const kd = Math.min(S.paslatDiepte, Dk);
+    const kd = Math.min(S.paslatDiepte, Dk, zFP);
     const kp = add({ id: `paslat-kast-${kant}`, naam: `Kastpaslat ${kant}`, rol: 'paslat', mat: 'korpus', dikte: t, grain: 'v', edges: {},
-      box: { x: left ? -t : W, y: -Pv, z: D - kd, w: t, h: sideH, d: kd }, uLen: kd, vLen: sideH });
+      box: { x: left ? -t : W, y: -Pv, z: zFP - kd, w: t, h: sideH, d: kd }, uLen: kd, vLen: sideH });
     // Greeploos: de greeplijsten lopen door over de paslat; de frontpaslat wordt daar onderbroken (een stuk per front)
     // en de kastpaslat krijgt dezelfde uitsparing als de zijwand.
     const grips = parts.filter(x => x.rol === 'greeplijst' && /staand/.test(x.naam)).map(x => [x.box.y, x.box.y + x.box.h, D - x.box.z]).sort((a2, b2) => a2[0] - b2[0]);
@@ -1540,7 +1551,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     if (!segs.length) segs.push([fY0, fY1]);
     const fps = segs.map(([s0, s1], i) => add({ id: `paslat-front-${kant}${segs.length > 1 ? `-${i + 1}` : ''}`, naam: `Frontpaslat ${kant}${segs.length > 1 ? ` ${i + 1}` : ''}`, rol: 'paslat', mat: 'front', dikte: fd, grain: 'v',
       edges: { u0: left ? 0 : S.bandFront, u1: left ? S.bandFront : 0, v0: S.bandFront, v1: S.bandFront },
-      box: { x: xf, y: s0, z: D, w: pw, h: s1 - s0, d: fd }, uLen: pw, vLen: s1 - s0 }));
+      box: { x: xf, y: s0, z: zFP, w: pw, h: s1 - s0, d: fd }, uLen: pw, vLen: s1 - s0 }));
     for (const [g0, g1, dOut] of grips) kp.ops.push({ kind: 'uitsparing', u: kd - dOut, v: g0 + Pv, w: dOut, h: g1 - g0, naam: 'Uitsparing greeplijst' });
     // Trapkast: de paslatten lopen mee met de schuinte (de frontpaslat bovenaan schuin gezaagd zoals de deuren;
     // de kastpaslat nergens hoger dan de schuine lijn).
@@ -1594,12 +1605,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const td2 = !isHang && k.plintTrespa && P > S.trespaDikte ? S.trespaDikte : 0;
     const y0 = isHang ? Math.min(0, frontsY0) : -P + td2;
     const y1 = H + (Number(k.paslat?.boven) || 0);
-    const zF = k.front === 'inliggend' ? D : D + fd;
+    const zF = k.front === 'inliggend' || zonderFronten ? D : D + fd;
     const pn = add({ id: `zijpaneel-${kant}`, naam: `Zijpaneel ${kant}`, rol: 'afwerk', mat: 'front', dikte: pd, grain: 'v',
       edges: { u0: 0, u1: S.bandFront, v0: isHang ? S.bandFront : 0, v1: S.bandFront },
-      box: { x: left ? -pd : W, y: y0, z: zBack, w: pd, h: y1 - y0, d: zF - zBack }, uLen: zF - zBack, vLen: y1 - y0 });
+      box: { x: left ? -pd : W, y: y0, z: 0, w: pd, h: y1 - y0, d: zF }, uLen: zF, vLen: y1 - y0 });   // tot achter de (opgeschroefde) rug
     if (td2) add({ id: `zijpaneel-${kant}-trespa`, naam: `Trespa onder zijpaneel ${kant}`, rol: 'trespa', mat: 'trespa', dikte: td2, grain: 'u', edges: {},
-      box: { x: left ? -pd : W, y: -P, z: zBack, w: pd, h: td2, d: zF - zBack }, uLen: zF - zBack, vLen: pd });
+      box: { x: left ? -pd : W, y: -P, z: 0, w: pd, h: td2, d: zF }, uLen: zF, vLen: pd });
     // Schroefgaten in de zijwand (van binnenuit), in een raster.
     const sd = left ? sideL : sideR;
     for (const vv of spreadPositions(sd.vLen, 400, 80)) for (const uu of [60, Dk - 60]) {
@@ -1624,7 +1635,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const left = rd.kant === 'links';
     const sd = left ? sideL : sideR;
     const X = xl => (left ? xl : W - xl);                  // xl ≤ 0: naar buiten vanaf het buitenvlak van de zijwand
-    const zf = k.front === 'inliggend' ? D : D + fd;        // voorvlak (fronten)
+    const zf = k.front === 'inliggend' || zonderFronten ? D : D + fd;   // voorvlak (fronten; zonder fronten: het korpus)
     const kop2 = rd.vorm === 'kop2';
     const vrij = rd.vorm === 'vrij';                          // vrije (organische) vorm, van voor tot achter terug naar de kast
     const half = rd.vorm === 'half' || kop2 || vrij;          // aan twee kanten rond (voor en achter)
@@ -2105,26 +2116,26 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     else if (ph < 20) warnings.push('Paslat boven: minstens 20 mm hoog.');
     else {
       const pwL = Number(k.paslat?.links) || 0, pwR = Number(k.paslat?.rechts) || 0;
-      const x0 = pwL >= t ? -v / 2 - pwL : frontX0, x1 = pwR >= t ? W + v / 2 + pwR : frontX1;
-      const yF = Math.max(fY1, H - v / 2) + v;                // boven de fronten, met een voeg
+      const x0 = pwL >= t ? -v / 2 - pwL : zonderFronten ? 0 : frontX0, x1 = pwR >= t ? W + v / 2 + pwR : zonderFronten ? W : frontX1;
+      const yF = zonderFronten ? H : Math.max(fY1, H - v / 2) + v;   // boven de fronten, met een voeg (zonder fronten: op de kast)
       const top = H + ph;
       const fpB = add({ id: 'paslat-front-boven', naam: 'Frontpaslat boven', rol: 'paslat', mat: 'front', dikte: fd, grain: 'u',
         edges: { u0: S.bandFront, u1: S.bandFront, v0: S.bandFront, v1: 0 },
-        box: { x: x0, y: yF, z: D, w: x1 - x0, h: top - yF, d: fd }, uLen: x1 - x0, vLen: top - yF });
+        box: { x: x0, y: yF, z: zFP, w: x1 - x0, h: top - yF, d: fd }, uLen: x1 - x0, vLen: top - yF });
       // Kastpaslatten rechtop op de kast (haaks op de frontpaslat, zoals aan de zijkant): aan elk uiteinde en ongeveer
       // om de 600 mm, met een Clamex op halve hoogte.
-      const kd = Math.min(S.paslatDiepte, D), hk = top - H;
+      const kd = Math.min(S.paslatDiepte, zFP), hk = top - H;
       if (top - yF < 40) warnings.push('Paslat boven: de frontpaslat is erg smal.');
       if (hk - t < 40) warnings.push('Paslat boven: te laag voor rechte kastpaslatten met Clamex; de frontpaslat op de liggende kastpaslat lijmen of schroeven.');
       // Liggende kastpaslat over de volle breedte (plat op de kast, zodat alles vlak ligt), met daarop de rechte stukken.
       add({ id: 'paslat-kast-boven', naam: 'Kastpaslat boven (liggend)', rol: 'paslat', mat: 'korpus', dikte: t, grain: 'u', edges: {},
-        box: { x: 0, y: H, z: D - kd, w: W, h: t, d: kd }, uLen: W, vLen: kd });
+        box: { x: 0, y: H, z: zFP - kd, w: W, h: t, d: kd }, uLen: W, vLen: kd });
       const hs = hk - t;                                       // hoogte van de rechte stukken op de liggende lat
       const nP = Math.max(2, Math.ceil((W - t) / S.plintBakAfstand) + 1);
       for (let i = 0; i < nP && hs >= 20; i++) {
         const px = i * (W - t) / (nP - 1);
         const kp = add({ id: `paslat-kast-boven-${i + 1}`, naam: `Kastpaslat boven ${i + 1} (rechtop)`, rol: 'paslat', mat: 'korpus', dikte: t, grain: 'v', edges: {},
-          box: { x: px, y: H + t, z: D - kd, w: t, h: hs, d: kd }, uLen: kd, vLen: hs });
+          box: { x: px, y: H + t, z: zFP - kd, w: t, h: hs, d: kd }, uLen: kd, vLen: hs });
         if (hs >= 40) {
           kp.ops.push({ kind: 'clamex', edge: 'u1', pos: hs / 2, naam: 'Clamex' });
           fpB.ops.push({ kind: 'clamex', face: 'binnen', u: px + t / 2 - x0, v: H + t + hs / 2 - yF, dir: [0, 1], naam: 'Clamex' });
@@ -2719,7 +2730,7 @@ function werkbladGeometry(project, S) {
     const first = loc.reduce((a, c) => (c.x < a.x ? c : a)), last = loc.reduce((a, c) => (c.x + Number(c.k.breedte) > a.x + Number(a.k.breedte) ? c : a));
     const padL = first.k.zijpaneel?.links ? (Number(first.k.zijpaneelDikte) || S.front) : 0, padR = last.k.zijpaneel?.rechts ? (Number(last.k.zijpaneelDikte) || S.front) : 0;
     const ax0 = x0 - padL - (Number(wb.links) || 0), ax1 = x1 + padR + (Number(wb.rechts) || 0);
-    const az0 = Number(wb.achter) || 0, az1 = D + fd + (wb.voor == null ? 20 : Number(wb.voor));
+    const az0 = Number(wb.achter) || 0, az1 = D + (loc.every(c => c.k.zonderFronten) ? 0 : fd) + (wb.voor == null ? 20 : Number(wb.voor));
     const depth = az1 - az0;
     // Uiteinden: recht of in verstek (45°, binnenhoek: vooraan korter). Profiel van achter naar voor.
     const vL = wb.eindeLinks === 'verstek', vR = wb.eindeRechts === 'verstek';
