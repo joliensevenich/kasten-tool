@@ -82,6 +82,7 @@ const DEFAULT_SETTINGS = {
   legplankDikGrens: 700,     // losse en vaste legplanken langer dan dit worden legplankDik dik (tegen doorhangen)
   legplankDik: 25,
   paslatDiepte: 100,         // kastpaslat achter de frontpaslat
+  zijpaneelNaastFront: 14,   // zijpaneel gelijk met het front (front erachter): max. dikte, anders gaat de deur niet open (155°-scharnier)
   paslatSchroefAfstand: 300,
   trespaDikte: 10,          // Trespa-strook onder de plint
   wegneembareRugHoogte: 200, // spoelbakkast: wegneembare rugstrook
@@ -386,6 +387,34 @@ function cabinetSettings(k, S) {
     }
   }
   return out;
+}
+
+/**
+ * Zijpaneel: 'gelijk' = voorkant gelijk met het front (het front zit ernaast/erachter; dan max. zijpaneelNaastFront dik
+ * en 155°-scharnieren aan die kant) of 'over' = het front loopt over de voorkant van het paneel.
+ */
+function zijpaneelMode(k) {
+  return k.front === 'inliggend' || k.zonderFronten ? 'gelijk' : (k.zijpaneelFront === 'over' ? 'over' : 'gelijk');
+}
+function zijpaneelDikte(k, S) {
+  if (Number(k.zijpaneelDikte) > 0) return Number(k.zijpaneelDikte);
+  return zijpaneelMode(k) === 'gelijk' && k.front !== 'inliggend' && !k.zonderFronten ? Math.min(S.front, S.zijpaneelNaastFront) : S.front;
+}
+
+/**
+ * Buigtriplex lang (boog langs de 2440 van de plaat) of kort (boog langs de 1220): per stuk de soort waarop het past.
+ * boog = afgewikkelde lengte, h = hoogte. voorkeur: 'lang' / 'kort' / leeg = automatisch (kort buigend als het past).
+ */
+function buigKeuze(boog, h, S, voorkeur) {
+  const N = S.nest ?? {}, rand = 2 * (Number(N.randafzaag) || 10);
+  const L = (Number(N.buigLengte) || 2440) - rand, B = (Number(N.buigBreedte) || 1220) - rand;
+  const past = { lang: boog <= L && h <= B, kort: boog <= B && h <= L };
+  // Automatisch: kort buigend als het past (dat is ook nodig voor hoge stukken), zodat er zo weinig mogelijk soorten
+  // platen nodig zijn; lang buigend alleen voor een lange, lage boog.
+  const auto = past.kort ? 'kort' : 'lang';
+  const eerst = voorkeur === 'lang' || voorkeur === 'kort' ? voorkeur : auto, ander = eerst === 'lang' ? 'kort' : 'lang';
+  const richting = past[eerst] ? eerst : past[ander] ? ander : eerst;
+  return { richting, past: past[richting], omgezet: !!voorkeur && voorkeur !== 'auto' && richting !== voorkeur };
 }
 
 function buildCabinet(k, S = DEFAULT_SETTINGS) {
@@ -919,6 +948,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // Fronten, legplanken, lades en toestellen per zone
   let frontX0 = k.front === 'inliggend' ? t + v / 2 : v / 2;
   let frontX1 = k.front === 'inliggend' ? W - t - v / 2 : W - v / 2;
+  // Zijpaneel waar het front over loopt: het front komt tot de buitenkant van het paneel (niet als er een paslat staat).
+  const zpOver = kant => !!k.zijpaneel?.[kant] && zijpaneelMode(k) === 'over' && !(Number(k.paslat?.[kant]) > 0);
+  if (zpOver('links')) frontX0 = -zijpaneelDikte(k, S);
+  if (zpOver('rechts')) frontX1 = W + zijpaneelDikte(k, S);
+  // Zijpaneel gelijk met het front (opliggend): de deur scharniert ernaast, dus een 155°-scharnier aan die kant.
+  const zpNaast = kant => !!k.zijpaneel?.[kant] && zijpaneelMode(k) === 'gelijk' && k.front !== 'inliggend' && !zonderFronten && !(Number(k.paslat?.[kant]) > 0);
   // Spitse kast: de front stopt waar de schuine bovenkant de onderkant van de front raakt.
   if (punt) { const reach = (H - v) / tanA - 1; if (rechtsHoog) frontX0 = Math.max(frontX0, W - reach); else frontX1 = Math.min(frontX1, reach); }
   const frontZ = k.front === 'inliggend' ? D - fd : D;
@@ -1350,7 +1385,9 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           });
           const hingeSide = hingeLeft ? sideL : sideR;
           for (const pv of positions) {
-            const cu = hingeLeft ? S.potRand + S.potDia / 2 : door.uLen - S.potRand - S.potDia / 2;
+            // Front over een zijpaneel: de deur steekt het paneel voorbij, dus de pot schuift even ver naar binnen (paneeldikte).
+            const potShift = hingeLeft ? (zpOver('links') && Math.abs(dx0 - frontX0) < 1 ? -frontX0 : 0) : (zpOver('rechts') && Math.abs(dx0 + dw - frontX1) < 1 ? frontX1 - W : 0);
+            const cu = hingeLeft ? S.potRand + S.potDia / 2 + potShift : door.uLen - S.potRand - S.potDia / 2 - potShift;
             door.ops.push({ kind: 'boring', face: 'binnen', u: cu, v: pv, dia: S.potDia, diepte: S.potDiepte, naam: 'Scharnierpot' });
             if (S.potDeuvels) {
               const du = cu + (hingeLeft ? 9.5 : -9.5);
@@ -1373,7 +1410,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
             } else if (pv === positions[0]) {
               warnings.push('Een deur scharniert niet tegen een zijwand of blindpaneel: voorzie de montageplaten apart.');
             }
-            count('Scharnier Blum (snelspan)');
+            count(zpNaast(hingeLeft ? 'links' : 'rechts') && atSide ? 'Scharnier Blum 155° (snelspan, naast zijpaneel)' : 'Scharnier Blum (snelspan)');
             count('Montageplaat');
           }
           handleHoles(door, true, hingeLeft ? false : true);
@@ -1599,13 +1636,15 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     if (!k.zijpaneel?.[kant]) continue;
     const left = kant === 'links';
     if (Number(k.paslat?.[kant]) > 0) warnings.push(`Zijpaneel ${kant}: er staat ook een paslat aan die kant; het paneel komt tegen de zijwand.`);
-    const pd = Number(k.zijpaneelDikte) || fd;
+    const pd = zijpaneelDikte(k, S);
+    const over = zpOver(kant);
+    if (zpNaast(kant) && pd > S.zijpaneelNaastFront) warnings.push(`Zijpaneel ${kant}: ${pd} mm dik terwijl het front ernaast zit; maximaal ${S.zijpaneelNaastFront} mm, anders gaat de deur niet open (155°-scharnier). Of laat het front over het paneel lopen.`);
     const isHang = PRESETS.find(x => x.id === k.type)?.groep === 'Bovenkasten';
     const frontsY0 = parts.filter(x => x.rol === 'front').reduce((m, x) => Math.min(m, x.box.y), 0);
     const td2 = !isHang && k.plintTrespa && P > S.trespaDikte ? S.trespaDikte : 0;
     const y0 = isHang ? Math.min(0, frontsY0) : -P + td2;
     const y1 = H + (Number(k.paslat?.boven) || 0);
-    const zF = k.front === 'inliggend' || zonderFronten ? D : D + fd;
+    const zF = k.front === 'inliggend' || zonderFronten || over ? D : D + fd;   // over: het front loopt voor het paneel
     const pn = add({ id: `zijpaneel-${kant}`, naam: `Zijpaneel ${kant}`, rol: 'afwerk', mat: 'front', dikte: pd, grain: 'v',
       edges: { u0: 0, u1: S.bandFront, v0: isHang ? S.bandFront : 0, v1: S.bandFront },
       box: { x: left ? -pd : W, y: y0, z: 0, w: pd, h: y1 - y0, d: zF }, uLen: zF, vLen: y1 - y0 });   // tot achter de (opgeschroefde) rug
@@ -1630,6 +1669,19 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // (rondTriplexLagen × rondTriplexDikte) in komt; tussenribben en opstaanders; HPL over alles. Clamex met deuvels.
   // Open: ronde bodem, top en legplanken met Clamex en deuvels. Plint (met Trespa) en werkblad rond mee.
   // Ronde kant links, rechts of aan beide kanten (dan dezelfde instellingen aan elke kant).
+  // Buigtriplex per stuk: lang of kort buigend, en in die richting op de plaat (grain = richting langs de 2440).
+  const buigMelding = new Set();
+  const buigZetten = v => {
+    const kz = buigKeuze(v.uLen, v.vLen, S, k.rond?.buigRichting);
+    v.buigRichting = kz.richting;
+    v.grain = kz.richting === 'lang' ? 'u' : 'v';
+    const naam = v.naam.replace(/ \(laag \d+\)$/, '');
+    if (buigMelding.has(naam)) return;
+    buigMelding.add(naam);
+    const N = S.nest ?? {}, pl = `${Number(N.buigLengte) || 2440} × ${Number(N.buigBreedte) || 1220}`;
+    if (!kz.past) warnings.push(`${naam}: ${Math.round(v.uLen)} × ${Math.round(v.vLen)} past niet op een plaat buigtriplex van ${pl} (lang of kort buigend); in stukken verdelen.`);
+    else if (kz.omgezet) warnings.push(`${naam}: past niet op ${k.rond.buigRichting} buigend buigtriplex; ${kz.richting} buigend gebruikt.`);
+  };
   const rondKanten = k.rond?.kant === 'beide' ? ['links', 'rechts'] : [k.rond?.kant];
   for (const rd of rondKanten.filter(x => x === 'links' || x === 'rechts').map(kant => ({ ...k.rond, kant }))) {
     const left = rd.kant === 'links';
@@ -2028,6 +2080,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           const v = shaped({ naam: `Buigtriplex ronde kant${pieces.length > 1 ? (pi ? ' achter' : ' voor') : ''} (laag ${i + 1})`, rol: 'rondhuid', mat: 'buig', dikte: S.rondTriplexDikte, grain: 'u', edges: {},
             vasteRichting: true, y: t - sp, h: H - 2 * (t - sp), kleurVast: '#d8b98a' }, [...dd(ends(r2)), ...dd(ends(r0)).reverse()]);
           v.uLen = polyLen(dd(ends((r0 + r2) / 2))); v.vLen = H - 2 * (t - sp);
+          buigZetten(v);
         }
       });
       // HPL: over alles: de rest van de plaat tegen de kast voor de sponning, de bogen en de rechte stukken.
@@ -2088,6 +2141,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           const v = shaped({ naam: `Buigtriplex ronde plint (laag ${i + 1})`, rol: 'rondhuid', mat: 'buig', dikte: S.rondTriplexDikte, grain: 'u', edges: {},
             vasteRichting: true, y: yP0, h: Ph, kleurVast: '#d8b98a' }, bandP(r0, r2));
           v.uLen = polyLen(endP((r0 + r2) / 2)) + 2 * S.rondOvermaat; v.vLen = Ph + S.rondOvermaat;
+          buigZetten(v);
         }
         const hpP = shaped({ naam: 'HPL ronde plint', rol: 'rondhuid', mat: 'hpl', dikte: S.rondHplDikte, grain: 'u', edges: {}, nietZagen: true, y: yP0, h: Ph }, bandP(Rp - S.rondHplDikte, Rp));
         hpP.uLen = polyLen(endP(Rp)) + 2 * S.rondOvermaat; hpP.vLen = Ph + S.rondOvermaat;
@@ -2105,7 +2159,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       }
     }
     if (kop2) warnings.push(`Kop over 2 kasten: ${mid ? `bogen R ${r1(R)} met ${r1(czF - czB)} mm recht ertussen` : 'één halfrond'} tot de front van de kast erachter (rug aan rug, zelfde diepte, 180° gedraaid). De Clamex in de zijwand van die kast komen er in de zaaglijst en de MPR-bestanden van het project bij.`);
-    warnings.push(`Ronde kant ${rd.kant}: ${vrij ? `vrije vorm ${(VRIJE_VORMEN[rd.vrijVorm] ?? VRIJE_VORMEN.ellips).naam.toLowerCase()}, ${r1(Number(rd.uitsteek) || 300)} uitsteek` : kop2 ? 'kop over 2 kasten' : half ? 'halfrond' : `kwartrond R ${r1(R)}`}, ${open ? 'open met ronde legplanken' : `dicht: plaat tegen de kast, ${half ? '' : 'plaat tegen de muur, '}top, bodem${tail ? ' en rechte zijkant' : ''}${mid ? ' en rechte voorkant' : ''} vol met sponning ${S.rondSponningBreedte} × ${sp}, ${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL`}. Kies buigtriplex dat rond een staande as buigt.`);
+    warnings.push(`Ronde kant ${rd.kant}: ${vrij ? `vrije vorm ${(VRIJE_VORMEN[rd.vrijVorm] ?? VRIJE_VORMEN.ellips).naam.toLowerCase()}, ${r1(Number(rd.uitsteek) || 300)} uitsteek` : kop2 ? 'kop over 2 kasten' : half ? 'halfrond' : `kwartrond R ${r1(R)}`}, ${open ? 'open met ronde legplanken' : `dicht: plaat tegen de kast, ${half ? '' : 'plaat tegen de muur, '}top, bodem${tail ? ' en rechte zijkant' : ''}${mid ? ' en rechte voorkant' : ''} vol met sponning ${S.rondSponningBreedte} × ${sp}, ${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL`}. Buigtriplex lang buigend = de boog loopt langs de 2440 van de plaat, kort buigend = langs de 1220; de app kiest per stuk.`);
   }
 
   // Paslat boven (bv. tot het plafond): frontpaslat boven de fronten over de volle breedte (ook over de paslatten
@@ -2722,7 +2776,7 @@ function werkbladGeometry(project, S) {
     const yTop = Math.max(...loc.map(c => c.L.y - L0.y + Number(c.k.hoogte)));    // bovenkant kasten (t.o.v. de eerste)
     // Een zijpaneel (afwerking) aan het uiteinde van de rij: het werkblad loopt erover.
     const first = loc.reduce((a, c) => (c.x < a.x ? c : a)), last = loc.reduce((a, c) => (c.x + Number(c.k.breedte) > a.x + Number(a.k.breedte) ? c : a));
-    const padL = first.k.zijpaneel?.links ? (Number(first.k.zijpaneelDikte) || S.front) : 0, padR = last.k.zijpaneel?.rechts ? (Number(last.k.zijpaneelDikte) || S.front) : 0;
+    const padL = first.k.zijpaneel?.links ? zijpaneelDikte(first.k, S) : 0, padR = last.k.zijpaneel?.rechts ? zijpaneelDikte(last.k, S) : 0;
     const ax0 = x0 - padL - (Number(wb.links) || 0), ax1 = x1 + padR + (Number(wb.rechts) || 0);
     const az0 = Number(wb.achter) || 0, az1 = D + (loc.every(c => c.k.zonderFronten) ? 0 : fd) + (wb.voor == null ? 20 : Number(wb.voor));
     const depth = az1 - az0;
@@ -2988,7 +3042,7 @@ function applyStandard(project, only = null) {
 /** Standaard plaattype: fronten (en plint) zoals gekozen bij de kast, de rest melamine. */
 function partBaseType(k, S, p) {
   if (p.mat === 'trespa') return 'Trespa';
-  if (p.mat === 'buig') return 'Buigtriplex';
+  if (p.mat === 'buig') return p.buigRichting === 'lang' ? 'Buigtriplex lang' : 'Buigtriplex kort';
   if (p.mat === 'hpl') return 'HPL';
   if (p.mat === 'rond') return k.frontMateriaal || S.frontMateriaal || 'Melamine';
   if (p.rol === 'plintbak') return 'Multiplex';

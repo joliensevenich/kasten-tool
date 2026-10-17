@@ -160,6 +160,12 @@ class Viewer {
     this.render();
   }
 
+  /** Panelen markeren (bv. HPL aanduiden): fn(part, cabKey) → true = gemarkeerd; null = alles terug normaal. */
+  markParts(fn, hex = 0xb35a00) {
+    for (const { mesh, cab } of this.items) mesh.material.emissive?.setHex(fn && fn(mesh.userData.part, cab) ? hex : 0x000000);
+    this.render();
+  }
+
   setMoveMode(on) {
     this.moveMode = on;
     if (!on) this.highlightCab(null);

@@ -112,10 +112,12 @@ const Projects = {
               <button type="button" id="pj-explode">${icon('explode')}<span>Uit elkaar</span></button>
               <button type="button" id="pj-fit">${icon('cube')}<span>Passend</span></button>
               ${p.kasten.length ? `<button type="button" id="pj-move" class="${this.moveMode ? 'on' : ''}">${icon('ruler')}<span>Verplaatsen</span></button>` : ''}
+              ${p.kasten.length ? `<button type="button" id="pj-hpl" class="${this.hplMode ? 'on' : ''}">${icon('list')}<span>HPL</span></button>` : ''}
             </div>
           </div>
           <div class="split-side">
             <div class="group ${this.moveMode ? '' : 'hidden'}" id="pj-movepanel"></div>
+            <div class="group ${this.hplMode ? '' : 'hidden'}" id="pj-hplpanel"></div>
             <div class="group"><div class="group-body">
               <button class="row link" type="button" id="pj-std"><span class="icon-label">${icon('gear')}Projectstandaarden</span><span class="row-sub" style="margin-left:auto">${Object.values(p.standaard ?? {}).filter(x => x !== null && x !== '').length || 'geen'}</span><span class="chev">${icon('right')}</span></button>
               <button class="row link" type="button" id="pj-wand"><span class="icon-label">${icon('plus')}Wand in één keer maken</span><span class="chev">${icon('right')}</span></button>
@@ -257,6 +259,7 @@ const Projects = {
     if (p.kasten.length) {
       this.viewer = makeViewer($('#pj-viewer', v), { onPick: hit => {
         if (this.panelPick) { pickPanelPoint(hit); return; }
+        if (this.hplMode) { toggleHpl(hit); return; }
         if (this.moveMode) {
           // Kast gekozen en tik op een andere kast: ertegen zetten (zijkant) of erop (bovenkant).
           // Paneel gekozen en tik op een kast: het paneel komt tegen die kant van de kast.
@@ -504,6 +507,7 @@ const Projects = {
       };
       $('#pj-move', v)?.addEventListener('click', () => {
         this.moveMode = !this.moveMode;
+        if (this.moveMode && this.hplMode) { this.hplMode = false; $('#pj-hpl', v)?.classList.remove('on'); $('#pj-hplpanel', v)?.classList.add('hidden'); viewer.markParts(null); }
         viewer.setMoveMode(this.moveMode);
         $('#pj-move', v).classList.toggle('on', this.moveMode);
         if (!this.moveMode) this.moveKey = null;
@@ -512,6 +516,52 @@ const Projects = {
       viewer.setMoveMode(!!this.moveMode);
       if (this.moveMode && this.moveKey) viewer.highlightCab(this.moveKey);
       renderMove();
+
+      // MARK: HPL aanduiden: tik op een paneel om het HPL te maken (of terug naar het standaard plaattype).
+      const isHpl = part => part?.plaattype === 'HPL';
+      const renderHpl = () => {
+        const hp = $('#pj-hplpanel', v);
+        if (!hp) return;
+        hp.classList.toggle('hidden', !this.hplMode);
+        viewer.markParts(this.hplMode ? (part, cab) => cab !== 'ruimte' && isHpl(part) : null);
+        if (!this.hplMode) return;
+        const n = p.kasten.reduce((t, k) => t + Object.values(k.partType ?? {}).filter(x => x === 'HPL').length, 0) + (p.panelen ?? []).filter(x => x.plaattype === 'HPL').length;
+        hp.innerHTML = `<div class="group-header head-with-btn"><span>HPL aanduiden</span><button type="button" class="head-btn" id="hpl-done">Klaar</button></div>
+          <div class="group-body"><div class="row"><span class="row-sub">Tik in 3D op een paneel: het wordt HPL (oranje). Nog eens tikken zet het terug op het standaard plaattype.
+            Doorlopende stukken (plint, paslat boven) gaan in één keer om. Alle fronten van een kast of het hele project HPL: <b>Plaattype fronten</b> bij de kast, in Projectstandaarden of bij Selecteer.</span></div>
+            <div class="row"><span class="row-label">Apart op HPL gezet</span><span class="row-value num">${n}</span></div></div>`;
+        $('#hpl-done', hp).addEventListener('click', () => { this.hplMode = false; $('#pj-hpl', v)?.classList.remove('on'); renderHpl(); });
+      };
+      const toggleHpl = hit => {
+        if (!hit?.part) return;
+        if (hit.cab?.startsWith?.('pn-')) {
+          const pn = panelOf(hit.cab);
+          if (!pn) return;
+          pn.plaattype = isHpl(hit.part) ? null : 'HPL';
+        } else {
+          const k0 = p.kasten.find(x => x.id === hit.cab);
+          if (!k0) return;
+          // Doorlopend stuk: bij alle kasten van de rij; anders alleen dit stuk.
+          const id = hit.part.id.replace(/-doorlopend$/, '');
+          const ks = hit.part.doorlopend ? p.kasten.filter(x => hit.part.doorlopend.includes(x.code)) : [k0];
+          const wordHpl = !isHpl(hit.part);
+          for (const k of ks) {
+            const base = buildCabinet(k, S()).parts.find(q => q.id === id);
+            k.partType = { ...(k.partType ?? {}) };
+            if (wordHpl) k.partType[id] = 'HPL';
+            else if (base && partBaseType(k, cabinetSettings(k, S()), base) === 'HPL') k.partType[id] = 'Melamine';
+            else delete k.partType[id];
+          }
+        }
+        touch(p); this.keepCamera = true; this.renderProject();
+      };
+      $('#pj-hpl', v)?.addEventListener('click', () => {
+        this.hplMode = !this.hplMode;
+        if (this.hplMode && this.moveMode) { this.moveMode = false; this.moveKey = null; viewer.setMoveMode(false); $('#pj-move', v)?.classList.remove('on'); renderMove(); }
+        $('#pj-hpl', v).classList.toggle('on', this.hplMode);
+        renderHpl();
+      });
+      if (this.hplMode) setTimeout(renderHpl, 0);
 
       // MARK: Afwerkpanelen (van punt tot punt)
       const corners = [];
@@ -1172,13 +1222,16 @@ function openCabinet(project, k, selectId = null) {
           ${k.uitsparing.auto ? '<div class="row"><span class="row-sub">Automatisch berekend uit een obstakel in het project. Pas je de maat hier aan, dan blijft jouw maat staan.</span></div>' : ''}` : ''}
         <div class="row"><span class="row-label">Zijpaneel links (afwerking)</span>${toggleHTML('f-zp-links', k.zijpaneel?.links)}</div>
         <div class="row"><span class="row-label">Zijpaneel rechts (afwerking)</span>${toggleHTML('f-zp-rechts', k.zijpaneel?.rechts)}</div>
-        ${k.zijpaneel?.links || k.zijpaneel?.rechts ? row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${S().front} (front)`)) : ''}
+        ${k.zijpaneel?.links || k.zijpaneel?.rechts ? `${k.front !== 'inliggend' && !k.zonderFronten ? row('Front en zijpaneel', selectHTML('f-zijpaneelFront', [['gelijk', 'Paneel gelijk met het front (front ernaast, 155°-scharnier)'], ['over', 'Front loopt over het paneel']], zijpaneelMode(k))) : ''}
+          ${row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${zijpaneelDikte({ ...k, zijpaneelDikte: null }, cabinetSettings(k, S()))} (standaard)`))}
+          ${zijpaneelMode(k) === 'gelijk' && k.front !== 'inliggend' && !k.zonderFronten ? `<div class="row"><span class="row-sub">Het front zit naast het paneel: het paneel mag maximaal ${S().zijpaneelNaastFront} mm dik zijn, anders gaat de deur niet open. Aan die kant komen 155°-scharnieren.</span></div>` : ''}` : ''}
         ${row('Ronde kant', selectHTML('f-rondKant', [['', 'Geen'], ['links', 'Links'], ['rechts', 'Rechts'], ['beide', 'Beide kanten']], k.rond?.kant ?? ''))}
         ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)'], ['kop2', 'Halfrond over 2 kasten (kop van een eiland, rug aan rug)'], ['vrij', 'Vrije vorm (golf, druppel, ...)']], k.rond.vorm ?? 'kwart'))}
           ${k.rond.vorm === 'vrij' ? vrijeVormHTML(k.rond) : ''}
           ${!['half', 'vrij'].includes(k.rond.vorm ?? 'kwart') ? row('Radius (buitenkant)', numHTML('f-rondRadius', k.rond.radius, k.rond.vorm === 'kop2' ? 'halve breedte' : '300')) : ''}
           ${k.rond.vorm !== 'vrij' ? row('Breedte ronde kant (vanaf de kast)', numHTML('f-rondBreedte', k.rond.breedte, 'radius')) : ''}
           ${row('Uitvoering', selectHTML('f-rondUit', [['dicht', `Dicht: ribben + ${S().rondTriplexLagen} × buigtriplex + HPL`], ['open', 'Open: ronde legplanken']], k.rond.uitvoering ?? 'dicht'))}
+          ${k.rond.uitvoering !== 'open' ? row('Buigtriplex', selectHTML('f-rondBuig', [['auto', 'Automatisch (kort buigend, lang als de boog te lang is)'], ['kort', 'Kort buigend (boog langs de 1220)'], ['lang', 'Lang buigend (boog langs de 2440)']], k.rond.buigRichting ?? 'auto')) : ''}
           ${k.rond.vorm === 'kop2' && k.rond.uitvoering !== 'open' ? `<div class="row"><span class="row-label">Nis in het rechte stuk</span>${toggleHTML('f-nisAan', k.rond.nis?.aan)}</div>
             ${k.rond.nis?.aan ? `${row('Nis: inhoud', selectHTML('f-nisInhoud', [['open', 'Open vak met legplanken'], ['deur', 'Inliggende deur'], ['lades', 'Inliggende lades']], k.rond.nis.inhoud ?? 'open'))}
               ${row('Nis: breedte', numHTML('f-nisB', k.rond.nis.breedte, 'recht stuk'))}
@@ -1247,10 +1300,12 @@ function openCabinet(project, k, selectId = null) {
     for (const [id, key] of [['f-usB', 'breedte'], ['f-usD', 'diepte']]) $(`#${id}`, form)?.addEventListener('input', e => { k.uitsparing = { ...(k.uitsparing ?? {}), [key]: e.target.value === '' ? null : Number(e.target.value), auto: false }; update(); });
     for (const kant of ['links', 'rechts']) $(`#f-zp-${kant}`, form)?.addEventListener('change', e => { k.zijpaneel = { ...(k.zijpaneel ?? {}), [kant]: e.target.checked }; renderForm(); update(); });
     $('#f-zijpaneelDikte', form)?.addEventListener('input', e => { k.zijpaneelDikte = e.target.value === '' ? null : Number(e.target.value); update(); });
+    $('#f-zijpaneelFront', form)?.addEventListener('change', e => { k.zijpaneelFront = e.target.value; renderForm(); update(); });
     $('#f-rondKant', form)?.addEventListener('change', e => { k.rond = e.target.value ? { vorm: 'kwart', uitvoering: 'dicht', ...(k.rond ?? {}), kant: e.target.value } : null; renderForm(); update(); });
     $('#f-rondVorm', form)?.addEventListener('change', e => { k.rond = { ...k.rond, vorm: e.target.value }; renderForm(); update(); });
     $('#f-rondUit', form)?.addEventListener('change', e => { k.rond = { ...k.rond, uitvoering: e.target.value }; renderForm(); update(); });
     $('#f-rondRadius', form)?.addEventListener('input', e => { k.rond = { ...k.rond, radius: e.target.value === '' ? null : Number(e.target.value) }; update(); });
+    $('#f-rondBuig', form)?.addEventListener('change', e => { k.rond = { ...k.rond, buigRichting: e.target.value === 'auto' ? null : e.target.value }; update(); });
     $('#f-nisAan', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { inhoud: 'open', ...(k.rond.nis ?? {}), aan: e.target.checked } }; renderForm(); update(); });
     $('#f-nisScharnier', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, scharnier: e.target.value } }; update(); });
     $('#f-nisInhoud', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, inhoud: e.target.value } }; renderForm(); update(); });
@@ -1959,8 +2014,9 @@ const stkLine = fields => fields.join(' ');
 const stkBoardType = r => {
   const N = { ...HPO_DEFAULTS, ...(S().nest ?? {}) };
   const type = r.plaattype ?? 'Melamine';
-  const tpl = type === 'HPL' ? N.hpoHpl : type === 'Trespa' ? N.hpoTrespa : type === 'Buigtriplex' ? N.hpoBuig : type === 'Multiplex' ? N.hpoMultiplex : N.hpoMelamine;
-  return String(tpl || '{decor}').replace(/\{hpo\}/gi, hpoDecor(r.decor)).replace(/\{decor\}/gi, r.decor ?? '').replace(/\{dikte\}/gi, String(Math.round(Number(r.dikte) * 10) / 10));
+  const buig = type.startsWith('Buigtriplex');
+  const tpl = type === 'HPL' ? N.hpoHpl : type === 'Trespa' ? N.hpoTrespa : buig ? N.hpoBuig : type === 'Multiplex' ? N.hpoMultiplex : N.hpoMelamine;
+  return String(tpl || '{decor}').replace(/\{richting\}/gi, buig ? (/lang/.test(type) ? 'LANG' : 'KORT') : '').replace(/\{hpo\}/gi, hpoDecor(r.decor)).replace(/\{decor\}/gi, r.decor ?? '').replace(/\{dikte\}/gi, String(Math.round(Number(r.dikte) * 10) / 10));
 };
 /** HPO-naam van een decor (categorie in de plaat- en kantendatabank van HPO, bv. EFFEN_1 of HOUT_2); anders de code. */
 const hpoDecor = code => decorOf(code)?.hpo || code || '';
@@ -2236,7 +2292,7 @@ const SETTING_GROUPS = [
   ['Deuvels en schroeven', [['deuvelDia', 'Deuvel Ø'], ['deuvelLengte', 'Deuvel lengte'], ['deuvelEersteVoor', 'Eerste deuvel vanaf voor'], ['deuvelPaar', 'Tweede deuvel: + (paar)'], ['deuvelLaatsteAchter', 'Laatste deuvel vanaf achter'], ['deuvelMaxTussen', 'Max. afstand ertussen'], ['schroefVoor', 'Eerste schroef vanaf voor'], ['schroefAchter', 'Laatste schroef vanaf achter'], ['deuvelDiepteVlak', 'Diepte in het vlak'], ['deuvelDiepteKant', 'Diepte in de kant'], ['schroefDia', 'Schroefgat Ø']]],
   ['Clamex', [['clamexMarge', 'Eerste en laatste vanaf voor/achter'], ['clamexMaxAfstand', 'Max. tussenafstand'], ['clamexDeuvel', 'Deuvel naast de Clamex (±)'], ['clamexLengte', 'Sleuflengte (tegenover elkaar binnen)'], ['clamexDiepte', 'Sleufdiepte per onderdeel']]],
   ['Hangkasten', [['ophangVanBoven', 'Ophanggaten vanaf boven'], ['ophangVanAchter', 'Ophanggaten vanaf achter'], ['ophangDia', 'Ophanggat Ø'], ['ophangDiepte', 'Ophanggat diepte']]],
-  ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder'], ['scharnierDeuvelDiepte', 'Deuvelgaatjes scharnier diepte'], ['plaatjeHoogte', 'Hoogte montageplaatje'], ['scharnierVrij', 'Vrij rond regels/tussenbodems'], ['scharnierInbouw', 'Schuine kast: scharnier steekt de kast in'], ['blindPlaatRand', 'Blinde hoek: plaatje vanaf kant blindpaneel'], ['blindPlaatTussen', 'Blinde hoek: afstand tussen gaten'], ['blindPlaatDia', 'Blinde hoek: gat Ø'], ['blindPlaatDiepte', 'Blinde hoek: gat diepte'], ['demperRand', 'Demper vanaf de hoek'], ['demperDia', 'Demper Ø'], ['demperDiepte', 'Demper diepte']]],
+  ['Scharnieren', [['montageplaatVoor', 'Montageplaat vanaf voorkant'], ['montageplaatTussen', 'Afstand tussen gaten'], ['montageplaatDia', 'Gat Ø'], ['montageplaatDiepte', 'Gat diepte'], ['potDia', 'Pot Ø'], ['potDiepte', 'Pot diepte'], ['potRand', 'Pot afstand tot rand'], ['scharnierRand', 'Scharnier vanaf boven/onder'], ['zijpaneelNaastFront', 'Zijpaneel naast het front: max. dikte'], ['scharnierDeuvelDiepte', 'Deuvelgaatjes scharnier diepte'], ['plaatjeHoogte', 'Hoogte montageplaatje'], ['scharnierVrij', 'Vrij rond regels/tussenbodems'], ['scharnierInbouw', 'Schuine kast: scharnier steekt de kast in'], ['blindPlaatRand', 'Blinde hoek: plaatje vanaf kant blindpaneel'], ['blindPlaatTussen', 'Blinde hoek: afstand tussen gaten'], ['blindPlaatDia', 'Blinde hoek: gat Ø'], ['blindPlaatDiepte', 'Blinde hoek: gat diepte'], ['demperRand', 'Demper vanaf de hoek'], ['demperDia', 'Demper Ø'], ['demperDiepte', 'Demper diepte']]],
   ['Systeemboringen', [['systeemVoor', 'Vanaf voorkant'], ['systeemVoorSmal', 'Vanaf voorkant in smalle kast'], ['systeemSmalGrens', 'Smalle kast: breedte kleiner dan'], ['systeemAchter', 'Vanaf rug'], ['systeemRaster', 'Raster'], ['systeemMarge', 'Vanaf boven/onder'], ['systeemDia', 'Ø'], ['systeemDiepte', 'Diepte']]],
   ['Markeringen', [['pootRandZij', 'Stelpoot: vanaf zijkant bodem'], ['pootVoor', 'Stelpoot: vanaf voorkant'], ['pootAchter', 'Stelpoot: vanaf achterkant'], ['pootVierkant', 'Stelpoot: vierkant puntjes'], ['pootMiddenVoor', 'Middenpoot voor vanaf breedte'], ['pootMiddenAchter', 'Middenpoot achter vanaf breedte'], ['pootDia', 'Puntje Ø'], ['pootDiepte', 'Puntje diepte'], ['hoekMerkRand', 'Merk zijwand: vanaf onder/achter'], ['hoekMerkDia', 'Merk zijwand Ø'], ['hoekMerkDiepte', 'Merk zijwand diepte']]],
   ['Ladegeleiders', [['frontBevZij', 'Frontbevestiging: vanaf binnenkant zijwand'], ['frontBevDia', 'Frontbevestiging Ø'], ['frontBevDiepte', 'Frontbevestiging diepte'], ['geleiderDia', 'Punten geleider Ø (euroschroef)'], ['geleiderDiepte', 'Punten geleider diepte'], ['geleiderAchterVrij', 'Laatste punt min. voor einde geleider'], ['binnenladeOpvul', 'Binnenladen: dikte opvullijst'], ['opvulLengte', 'Opvullijst: lengte'], ['opvulHoogte', 'Opvullijst: hoogte'], ['opvulSchroeven', 'Opvullijst: schroeven per lijst'], ['binnenladeTerug', 'Binnenladen: binnenfront terug van voorkant'], ['binnenfrontExtra', 'Binnenfront: hoogte rug + '], ['binnenladeTussen', 'Binnenladen: ruimte ertussen'], ['ladeSponningBreedte', 'Bodem/rug: sponning breedte'], ['ladeSponningDiepte', 'Bodem/rug: sponning diepte'], ['ladeSchroefAfstand', 'Schroeven bodem in rug: afstand']]],

@@ -135,6 +135,9 @@ function mergeSettings(saved) {
   if (Array.isArray(out.tools) && !out.tools.some(t => String(t.nr) === '160')) out.tools.push({ nr: '160', naam: 'Boor Ø10 (push-open drevel), alle richtingen', soort: 'boorH', dia: 10, lengte: 90 });
   // Spoelbakkast: wegneembare rug 5 cm van de achterkant (vroeger 13 mm).
   if (saved.wegneembareRugAchter === 13) out.wegneembareRugAchter = 50;
+  // Buigtriplex: platen van 2440 × 1220 (opgegeven 17-10-2026; vroeger 2500) en de HPO-naam met de buigrichting.
+  if (saved.nest?.buigLengte === 2500) out.nest.buigLengte = 2440;
+  if (saved.nest?.hpoBuig === 'BUIGTRIPLEX_{dikte}') out.nest.hpoBuig = 'BUIGTRIPLEX_{richting}_{dikte}';
   // Ladebodem en -rug in 18 mm (aan de randen afgefreesd tot 16 mm).
   if (saved.ladeBodemDikte === 16) out.ladeBodemDikte = 18;
   for (const serie of Object.keys(base.blum)) {
