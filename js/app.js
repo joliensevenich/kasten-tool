@@ -130,6 +130,7 @@ const Projects = {
               <button class="row button" type="button" id="pj-mpr"><span class="icon-label">${icon('download')}MPR-bestanden (woodWOP)</span></button>
               <button class="row button" type="button" id="pj-csv"><span class="icon-label">${icon('table')}Zaaglijst STK (Schelling HPO)</span></button>
               <button class="row button" type="button" id="pj-tek"><span class="icon-label">${icon('ruler')}Montagetekening (PDF, A3)</span></button>
+              <button class="row button" type="button" id="pj-delen"><span class="icon-label">${icon('ruler')}Werktekeningen per onderdeel (PDF)</span></button>
               <button class="row button" type="button" id="pj-scan"><span class="icon-label">${icon('list')}Scancodes (PDF)</span></button>
               <button class="row button" type="button" id="pj-import"><span class="icon-label">${icon('copy')}Kasten uit ander project toevoegen</span></button>
               <button class="row button" type="button" id="pj-share"><span class="icon-label">${icon('share')}Projectbestand delen</span></button>
@@ -164,6 +165,7 @@ const Projects = {
     $('#pj-select', v)?.addEventListener('click', () => { this.selectMode = !this.selectMode; this.selected = new Set(); this.keepCamera = true; this.renderProject(); });
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));
     $('#pj-tek', v).addEventListener('click', () => { const d = technicalDrawingPdf(p, S()); shareFile(d.blob, d.name); });
+    $('#pj-delen', v).addEventListener('click', () => { const d = partsDrawingPdf(p, S()); shareFile(d.blob, d.name); });
     $('#pj-scan', v).addEventListener('click', () => {
       if (!p.kasten.length) { alertBox('Geen kasten', 'Voeg eerst kasten toe aan het project.'); return; }
       const d = scanCodesFor(p, cutRows(p).rows); shareFile(d.blob, d.name);
@@ -915,18 +917,19 @@ function openCabinet(project, k, selectId = null) {
         <div class="row"><span class="row-label">Zijpaneel links (afwerking)</span>${toggleHTML('f-zp-links', k.zijpaneel?.links)}</div>
         <div class="row"><span class="row-label">Zijpaneel rechts (afwerking)</span>${toggleHTML('f-zp-rechts', k.zijpaneel?.rechts)}</div>
         ${k.zijpaneel?.links || k.zijpaneel?.rechts ? row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${S().front} (front)`)) : ''}
-        ${row('Ronde kant', selectHTML('f-rondKant', [['', 'Geen'], ['links', 'Links'], ['rechts', 'Rechts']], k.rond?.kant ?? ''))}
-        ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)'], ['kop2', 'Halfrond over 2 kasten (kop van een eiland, rug aan rug)']], k.rond.vorm ?? 'kwart'))}
-          ${(k.rond.vorm ?? 'kwart') !== 'half' ? row('Radius (buitenkant)', numHTML('f-rondRadius', k.rond.radius, k.rond.vorm === 'kop2' ? 'halve breedte' : '300')) : ''}
-          ${row('Breedte ronde kant (vanaf de kast)', numHTML('f-rondBreedte', k.rond.breedte, 'radius'))}
+        ${row('Ronde kant', selectHTML('f-rondKant', [['', 'Geen'], ['links', 'Links'], ['rechts', 'Rechts'], ['beide', 'Beide kanten']], k.rond?.kant ?? ''))}
+        ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)'], ['kop2', 'Halfrond over 2 kasten (kop van een eiland, rug aan rug)'], ['vrij', 'Vrije vorm (golf, druppel, ...)']], k.rond.vorm ?? 'kwart'))}
+          ${k.rond.vorm === 'vrij' ? vrijeVormHTML(k.rond) : ''}
+          ${!['half', 'vrij'].includes(k.rond.vorm ?? 'kwart') ? row('Radius (buitenkant)', numHTML('f-rondRadius', k.rond.radius, k.rond.vorm === 'kop2' ? 'halve breedte' : '300')) : ''}
+          ${k.rond.vorm !== 'vrij' ? row('Breedte ronde kant (vanaf de kast)', numHTML('f-rondBreedte', k.rond.breedte, 'radius')) : ''}
           ${row('Uitvoering', selectHTML('f-rondUit', [['dicht', `Dicht: ribben + ${S().rondTriplexLagen} × buigtriplex + HPL`], ['open', 'Open: ronde legplanken']], k.rond.uitvoering ?? 'dicht'))}
           ${k.rond.vorm === 'kop2' && k.rond.uitvoering !== 'open' ? `<div class="row"><span class="row-label">Nis in het rechte stuk</span>${toggleHTML('f-nisAan', k.rond.nis?.aan)}</div>
-            ${k.rond.nis?.aan ? `${row('Nis: inhoud', selectHTML('f-nisInhoud', [['open', 'Open vak met legplanken'], ['deur', 'Kast met deur'], ['lades', 'Kast met lades']], k.rond.nis.inhoud ?? 'open'))}
+            ${k.rond.nis?.aan ? `${row('Nis: inhoud', selectHTML('f-nisInhoud', [['open', 'Open vak met legplanken'], ['deur', 'Inliggende deur'], ['lades', 'Inliggende lades']], k.rond.nis.inhoud ?? 'open'))}
               ${row('Nis: breedte', numHTML('f-nisB', k.rond.nis.breedte, 'recht stuk'))}
               ${row('Nis: hoogte', numHTML('f-nisH', k.rond.nis.hoogte, '500'))}
               ${row('Nis: vanaf onderkant kast', numHTML('f-nisY', k.rond.nis.vanOnder, '100'))}
               ${row('Nis: diepte', numHTML('f-nisD', k.rond.nis.diepte, 'zo diep mogelijk'))}
-              ${(k.rond.nis.inhoud ?? 'open') === 'lades' ? row('Nis: aantal lades', numHTML('f-nisLades', k.rond.nis.lades, '2')) : row('Nis: legplanken', numHTML('f-nisLeg', k.rond.nis.legplanken, '1'))}` : ''}` : ''}
+              ${(k.rond.nis.inhoud ?? 'open') === 'lades' ? row('Nis: aantal lades', numHTML('f-nisLades', k.rond.nis.lades, '2')) : (k.rond.nis.inhoud ?? 'open') === 'deur' ? row('Nis: scharnieren', selectHTML('f-nisScharnier', [['links', 'Links'], ['rechts', 'Rechts']], k.rond.nis.scharnier ?? 'links')) : row('Nis: legplanken', numHTML('f-nisLeg', k.rond.nis.legplanken, '1'))}` : ''}` : ''}
           ${k.rond.uitvoering === 'open' ? row('Ronde legplanken (tussen bodem en top)', numHTML('f-rondLeg', k.rond.legplanken, '2')) : row('HPL decor', decorSelectHTML('f-rondDecor', k.rond.decor ?? '', [['', 'Zoals de fronten']]))}
           <div class="row"><span class="row-sub">De ronde kant komt buiten de zijwand. Breedte = hoe ver het ronde deel naast de kast uitsteekt (tot de buitenkant); breder dan de radius = vooraan eerst recht, dan de boog. Plint en werkblad lopen rond mee.</span></div>` : ''}
         ${row('Paslat links (breedte)', numHTML('f-paslat-links', k.paslat?.links, 'geen'))}
@@ -991,9 +994,17 @@ function openCabinet(project, k, selectId = null) {
     $('#f-rondUit', form)?.addEventListener('change', e => { k.rond = { ...k.rond, uitvoering: e.target.value }; renderForm(); update(); });
     $('#f-rondRadius', form)?.addEventListener('input', e => { k.rond = { ...k.rond, radius: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     $('#f-nisAan', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { inhoud: 'open', ...(k.rond.nis ?? {}), aan: e.target.checked } }; renderForm(); update(); });
+    $('#f-nisScharnier', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, scharnier: e.target.value } }; update(); });
     $('#f-nisInhoud', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, inhoud: e.target.value } }; renderForm(); update(); });
     for (const [id, key] of [['f-nisB', 'breedte'], ['f-nisH', 'hoogte'], ['f-nisY', 'vanOnder'], ['f-nisD', 'diepte'], ['f-nisLades', 'lades'], ['f-nisLeg', 'legplanken']])
       $(`#${id}`, form)?.addEventListener('input', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, [key]: e.target.value === '' ? null : Number(e.target.value) } }; update(); });
+    // Vrije vorm: vorm aantikken, uitsteek en de drie bolletjes (vooraan, midden, achteraan).
+    $$('[data-vrijvorm]', form).forEach(b => b.addEventListener('click', () => { k.rond = { ...k.rond, vrijVorm: b.dataset.vrijvorm }; renderForm(); update(); }));
+    $('#f-vrijUit', form)?.addEventListener('input', e => { k.rond = { ...k.rond, uitsteek: Number(e.target.value) }; $('#f-vrijUitV', form).textContent = `${e.target.value} mm`; update(); });
+    $$('[data-vrijh]', form).forEach(el2 => el2.addEventListener('input', e => {
+      const h = [...(k.rond.vrijH ?? [1, 1, 1])]; h[Number(el2.dataset.vrijh)] = Number(e.target.value) / 100; k.rond = { ...k.rond, vrijH: h };
+      el2.nextElementSibling.textContent = `${e.target.value}%`; update();
+    }));
     $('#f-rondBreedte', form)?.addEventListener('input', e => { k.rond = { ...k.rond, breedte: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     $('#f-rondLeg', form)?.addEventListener('input', e => { k.rond = { ...k.rond, legplanken: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     { const dec = $('#f-rondDecor', form); if (dec) bindDecor(dec, v => { k.rond = { ...k.rond, decor: v || null }; update(); }); }
@@ -1255,6 +1266,18 @@ const EDGE_NAMES = {
   lade: { u0: 'Links', u1: 'Rechts', v0: 'Achterkant', v1: 'Voorkant' },
   default: { u0: 'Links', u1: 'Rechts', v0: 'Onderkant', v1: 'Bovenkant' },
 };
+
+/** Vrije vorm: tekeningetjes om aan te tikken, een schuifje voor de uitsteek en drie voor de bolletjes. */
+function vrijeVormHTML(rd) {
+  const thumb = id => {
+    const pts = vrijeVormLijn({ ...rd, vrijVorm: id, vrijH: [1, 1, 1] }, 0, 100, 0, 34, 30).map(([x, z]) => `${(40 + x).toFixed(1)},${(z * 0.62 + 4).toFixed(1)}`);
+    return `<svg viewBox="0 0 44 70" width="34" height="54" aria-hidden="true"><polyline points="${pts.join(' ')}" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><line x1="40" y1="4" x2="40" y2="66" stroke="currentColor" stroke-width="1" opacity=".35"/></svg>`;
+  };
+  const cur = rd.vrijVorm ?? 'ellips', h = rd.vrijH ?? [1, 1, 1], uit = Number(rd.uitsteek) || 300;
+  return `<div class="row" style="flex-wrap:wrap;gap:8px">${Object.entries(VRIJE_VORMEN).map(([id, v]) => `<button type="button" class="mini${id === cur ? ' active' : ''}" data-vrijvorm="${id}" style="display:flex;flex-direction:column;align-items:center;padding:4px 8px;${id === cur ? 'outline:2px solid var(--accent, #0a64d8);' : ''}">${thumb(id)}<span style="font-size:12px">${v.naam}</span></button>`).join('')}</div>
+    <div class="row"><span class="row-label">Uitsteek</span><input type="range" id="f-vrijUit" min="120" max="900" step="10" value="${uit}" style="flex:1"><span id="f-vrijUitV" class="row-value" style="min-width:64px;text-align:right">${uit} mm</span></div>
+    ${['vooraan', 'midden', 'achteraan'].map((n, i) => `<div class="row"><span class="row-label">Bolletje ${n}</span><input type="range" data-vrijh="${i}" min="40" max="160" step="5" value="${Math.round((h[i] ?? 1) * 100)}" style="flex:1"><span class="row-value" style="min-width:48px;text-align:right">${Math.round((h[i] ?? 1) * 100)}%</span></div>`).join('')}`;
+}
 
 /**
  * Volgorde van afplakken voor het etiket: eerst de minst zichtbare kant, de meest zichtbare laatst, zodat de kop van de

@@ -329,6 +329,42 @@ function spreadPositions(len, step, marge) {
 }
 
 /** Aantal scharnieren volgens de Blum-tabel (deurhoogte); een deur breder dan 600 mm (zwaarder) krijgt er één bij. */
+// MARK: - Vrije vormen (organische ronde kant)
+/** Vormen: uitsteek als factor van de grootste uitsteek, langs de diepte s (0 = voorkant, 1 = achterkant). */
+const VRIJE_VORMEN = {
+  ellips: { naam: 'Ellips', m: () => 1 },
+  golf: { naam: 'Golf', m: s => 0.9 + 0.1 * Math.cos(4 * Math.PI * (s - 0.5)) },
+  druppel: { naam: 'Druppel', m: s => 0.62 + 0.45 * Math.pow(1 - s, 1.3) },
+  s: { naam: 'S-bocht', m: s => 0.78 + 0.22 * Math.sin(2 * Math.PI * s) },
+};
+/**
+ * Omtrek van een vrije vorm (buitenkant, zonder dikte) van vooraan (cx, zF) naar achteraan (cx, zB): x = cx − A·f(s).
+ * f = halve ellips × vormfactor × de drie bolletjes (vooraan, midden, achteraan), zodat de lijn aan beide uiteinden
+ * haaks op het vlak van de kast vertrekt (zoals bij de halfronde kant).
+ */
+function vrijeVormLijn(rd, zF, zB, cx, A, n = 60) {
+  const vorm = VRIJE_VORMEN[rd.vrijVorm] ?? VRIJE_VORMEN.ellips;
+  const h = [1, ...(rd.vrijH ?? [1, 1, 1]).map(v => Math.max(0.3, Math.min(1.8, Number(v) || 1))), 1];
+  const hAt = s => { const x = s * 4, i = Math.min(3, Math.floor(x)), f = x - i, w = (1 - Math.cos(Math.PI * f)) / 2; return h[i] * (1 - w) + h[i + 1] * w; };
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const s = (1 - Math.cos(Math.PI * i / n)) / 2;            // dichter bij de uiteinden
+    const e = Math.sqrt(Math.max(0, 1 - (2 * s - 1) ** 2));
+    pts.push([cx - A * e * vorm.m(s) * hAt(s), zF - s * (zF - zB)]);
+  }
+  return pts;
+}
+/** Lijn evenwijdig verschuiven (d > 0 = naar binnen, naar de kast): de lijn loopt van voor naar achter met de kast aan de +x-kant. */
+function offsetLijn(pts, d) {
+  const n = pts.length;
+  return pts.map((p, i) => {
+    let tx, tz;
+    if (i === 0) { tx = -1; tz = 0; } else if (i === n - 1) { tx = 1; tz = 0; }
+    else { tx = pts[i + 1][0] - pts[i - 1][0]; tz = pts[i + 1][1] - pts[i - 1][1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l; }
+    return [p[0] - tz * d, p[1] + tx * d];
+  });
+}
+
 function hingeCount(h, w = 0) {
   return (h <= 900 ? 2 : h <= 1600 ? 3 : h <= 2000 ? 4 : 5) + (w > 600 ? 1 : 0);
 }
@@ -1582,14 +1618,16 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // bodem, rechte stukken als volle plaat; sponningen (rondSponningBreedte × rondSponningDiepte) waar het buigtriplex
   // (rondTriplexLagen × rondTriplexDikte) in komt; tussenribben en opstaanders; HPL over alles. Clamex met deuvels.
   // Open: ronde bodem, top en legplanken met Clamex en deuvels. Plint (met Trespa) en werkblad rond mee.
-  const rd = k.rond;
-  if (rd && (rd.kant === 'links' || rd.kant === 'rechts')) {
+  // Ronde kant links, rechts of aan beide kanten (dan dezelfde instellingen aan elke kant).
+  const rondKanten = k.rond?.kant === 'beide' ? ['links', 'rechts'] : [k.rond?.kant];
+  for (const rd of rondKanten.filter(x => x === 'links' || x === 'rechts').map(kant => ({ ...k.rond, kant }))) {
     const left = rd.kant === 'links';
     const sd = left ? sideL : sideR;
     const X = xl => (left ? xl : W - xl);                  // xl ≤ 0: naar buiten vanaf het buitenvlak van de zijwand
     const zf = k.front === 'inliggend' ? D : D + fd;        // voorvlak (fronten)
     const kop2 = rd.vorm === 'kop2';
-    const half = rd.vorm === 'half' || kop2;                 // aan twee kanten rond (voor en achter)
+    const vrij = rd.vorm === 'vrij';                          // vrije (organische) vorm, van voor tot achter terug naar de kast
+    const half = rd.vorm === 'half' || kop2 || vrij;          // aan twee kanten rond (voor en achter)
     const open = rd.uitvoering === 'open';
     const diep = zf - zBack;
     const R = kop2 ? Math.max(50, Math.min(Number(rd.radius) || diep, diep)) : half ? diep / 2
@@ -1597,7 +1635,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     // Breedte van het ronde deel (vanaf de kast tot de buitenkant): standaard R (+ de plaat tegen de kast); breder =
     // vooraan eerst een recht stuk, dan de boog.
     const xPan = open ? 0 : -t;                               // buitenvlak van de plaat tegen de kast
-    const Bw = Math.max(R - xPan, Number(rd.breedte) || 0);
+    const Bw = vrij ? R - xPan : Math.max(R - xPan, Number(rd.breedte) || 0);
     const cx = -(Bw - R);
     // Middelpunten van de boog vooraan en achteraan (kop2: achteraan aan de front van de kast erachter, zelfde diepte).
     const czF = zf - R, czB = kop2 ? zBack - diep + R : czF;
@@ -1614,7 +1652,20 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const arcB = rr => arcAt(rr, czB, Math.PI, 1.5 * Math.PI);
     // Omtrek op afstand rr van de middelpunten: boog vooraan (en recht stuk + boog achteraan).
     const dd = pts => pts.filter((q, i) => i === 0 || Math.hypot(q[0] - pts[i - 1][0], q[1] - pts[i - 1][1]) > 0.01);
-    const arc = rr => dd(half ? [...arcF(rr), ...arcB(rr)] : arcF(rr));
+    // Vrije vorm: de buitenkant (niveau R) volgt de gekozen vorm; elk ander niveau is een evenwijdige lijn.
+    const vrijA = vrij ? Math.max(40, (Number(rd.uitsteek) || 300) - (open ? 0 : t)) : 0;
+    const vrijBase = vrij ? vrijeVormLijn(rd, zf, zBack, cx, vrijA) : null;
+    const arc = rr => vrij ? dd(offsetLijn(vrijBase, R - rr)) : dd(half ? [...arcF(rr), ...arcB(rr)] : arcF(rr));
+    if (vrij && !open) {
+      // Kleinste bocht van de vrije vorm (aan de buitenkant): te krap voor HPL of buigtriplex?
+      const c = vrijBase; let rmin = Infinity;
+      for (let i = 1; i + 1 < c.length; i++) {
+        const [a, b, d2] = [c[i - 1], c[i], c[i + 1]], ab = Math.hypot(b[0] - a[0], b[1] - a[1]), bc = Math.hypot(d2[0] - b[0], d2[1] - b[1]), ca2 = Math.hypot(d2[0] - a[0], d2[1] - a[1]);
+        const area = Math.abs((b[0] - a[0]) * (d2[1] - a[1]) - (d2[0] - a[0]) * (b[1] - a[1])) / 2;
+        if (area > 1e-6) rmin = Math.min(rmin, ab * bc * ca2 / (4 * area));
+      }
+      if (rmin < S.rondHplMinRadius) warnings.push(`Vrije vorm: de krapste bocht is R ${r1(rmin)} mm, kleiner dan de kleinste buigradius van de HPL (${S.rondHplMinRadius} mm). Maak de vorm vloeiender of minder diep.`);
+    }
     const polyLen = pts => pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0);
     const tail = !half && cz > zBack + sp + 5;              // kwartrond: recht stuk van de boog tot tegen de muur
     // Een vlak deel met een vorm in het bovenaanzicht (xl, z).
@@ -1655,6 +1706,21 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     // Stukken langs de bogen (opstaanders): posities en richting naar het middelpunt.
     const alongArcs = (rr, step) => {
       const out = [];
+      if (vrij) {
+        // Langs de vrije lijn: per punt een denkbeeldig middelpunt (punt − rr × normaal naar buiten), zodat studQuad werkt.
+        const c = arc(rr), cum = [0];
+        for (let i = 1; i < c.length; i++) cum.push(cum[i - 1] + Math.hypot(c[i][0] - c[i - 1][0], c[i][1] - c[i - 1][1]));
+        const L = cum[cum.length - 1], n = Math.max(1, Math.ceil(L / step) - 1);
+        for (let j = 1; j <= n; j++) {
+          const sL = L * j / (n + 1); let i = cum.findIndex(v => v >= sL); i = Math.max(1, i);
+          const f = (sL - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1);
+          const P = [c[i - 1][0] + (c[i][0] - c[i - 1][0]) * f, c[i - 1][1] + (c[i][1] - c[i - 1][1]) * f];
+          let tx = c[i][0] - c[i - 1][0], tz = c[i][1] - c[i - 1][1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+          const ux = tz, uz = -tx;                            // normaal naar buiten
+          out.push({ a: Math.atan2(uz, ux), ccz: P[1] - rr * uz, off: P[0] - rr * ux - cx });
+        }
+        return out;
+      }
       for (const [ccz, a0] of half ? [[czF, Math.PI / 2], [czB, Math.PI]] : [[czF, Math.PI / 2]]) {
         const n = Math.max(1, Math.ceil(rr * Math.PI / 2 / step) - 1);
         for (let j = 1; j <= n; j++) out.push({ a: a0 + (Math.PI / 2) * j / (n + 1), ccz });
@@ -1671,11 +1737,12 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     const zc = (czF + czB) / 2;
     const xFP = cx - Ro + t;                                 // binnenvlak van de rechte voorkant (kop2)
     const nis = nisOn ? (() => {
+      // Vrije maten van de nis (binnenmaat); rondom komen de nisplaten (t) in de buitenkleur.
       const lenS = czF - czB;
-      const nb = Math.max(150, Math.min(Number(rd.nis.breedte) || lenS - 2 * t, lenS - 2 * sp - 20));
-      const nh = Math.max(150, Math.min(Number(rd.nis.hoogte) || 500, H - 2 * t - 10));
-      const ny = Math.max(t + 5, Math.min(Number(rd.nis.vanOnder ?? 100) || t + 5, H - t - 5 - nh));
-      const avail = xPan - xFP;
+      const nb = Math.max(150, Math.min(Number(rd.nis.breedte) || lenS - 4 * t, lenS - 2 * sp - 20 - 2 * t));
+      const nh = Math.max(150, Math.min(Number(rd.nis.hoogte) || 500, H - 4 * t - 10));
+      const ny = Math.max(2 * t + 5, Math.min(Number(rd.nis.vanOnder ?? 100) || 2 * t + 5, H - 2 * t - 5 - nh));
+      const avail = xPan - (cx - R) - t;                     // van de voorkant tot de plaat tegen de kasten, min de nisrug
       const ndp = Math.max(100, Math.min(Number(rd.nis.diepte) || avail, avail));
       return { nb, nh, ny, ndp };
     })() : null;
@@ -1750,11 +1817,13 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       if (mid) {
         front = inPlane('Rechte voorkant ronde kop', czB, czF, ['u0', 'u1']);
         if (nis) {
-          const u0 = zc - nis.nb / 2 - front.box.z, v0 = nis.ny - front.box.y;
-          front.ops.push({ kind: 'uitsparing', u: u0, v: v0, w: nis.nb, h: nis.nh, naam: 'Opening nis' });
+          // Opening: de rand van de voorplaat zit in de sponning van de nisplaten (sp diep), dus nis + 2 × (t − sp).
+          const lipN = t - sp, ow = nis.nb + 2 * lipN, oh = nis.nh + 2 * lipN;
+          const u0 = zc - ow / 2 - front.box.z, v0 = nis.ny - lipN - front.box.y;
+          front.ops.push({ kind: 'uitsparing', u: u0, v: v0, w: ow, h: oh, naam: 'Opening nis' });
           // 3D: de plaat met de opening.
           front.shape3d = { plane: 'zy', pts: [[0, 0], [front.box.d, 0], [front.box.d, front.box.h], [0, front.box.h]],
-            holes: [[[u0, v0], [u0, v0 + nis.nh], [u0 + nis.nb, v0 + nis.nh], [u0 + nis.nb, v0]]] };
+            holes: [[[u0, v0], [u0, v0 + oh], [u0 + ow, v0 + oh], [u0 + ow, v0]]] };
         }
       }
       // Plaat tegen de muur (kwartrond): achteraan tussen de plaat tegen de kast en de rechte zijkant (of de boog).
@@ -1793,7 +1862,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const ribYs = [];
       for (let i = 1; i <= nMid; i++) {
         const y = i * (H - t) / (nMid + 1);
-        if (nis && y + t > nis.ny - 5 && y < nis.ny + nis.nh + 5) continue;
+        if (nis && y + t > nis.ny - t - 5 && y < nis.ny + nis.nh + t + 5) continue;
         ribYs.push(y);
         const rib = shaped({ naam: 'Rib ronde kant', rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'u', edges: {}, y, h: t }, ribPoly);
         rib.uLen = rib.box.w; rib.vLen = rib.box.d;
@@ -1812,7 +1881,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       {
         const sdp = S.rondStaanderBreedte, hw = t / 2;
         const Ls = xPan - cx, ms = Ls > S.rondStaanderAfstand * 0.6 ? Math.ceil(Ls / S.rondStaanderAfstand) - 1 || 1 : 0;
-        const spots = alongArcs(Ri, S.rondStaanderAfstand).map(s => ({ ...s, off: 0 }));
+        const spots = alongArcs(Ri, S.rondStaanderAfstand).map(s => ({ off: 0, ...s }));
         for (let j = 1; j <= ms; j++) {
           spots.push({ a: Math.PI / 2, ccz: czF, off: Ls * j / (ms + 1) });
           if (half) spots.push({ a: 1.5 * Math.PI, ccz: czB, off: Ls * j / (ms + 1) });
@@ -1855,32 +1924,87 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
           }
         }
       }
-      // Nis: een rechte kast (open, met deur of met lades) achter de opening in de rechte voorkant; de fronten liggen in de
-      // opening, gelijk met de voorkant van de kop. Gemaakt als een gewone kast en in de kop gedraaid.
+      // Nis: opgebouwd uit de ronde kop zelf: nisbodem, nistop, twee nis-zijkanten en een nisrug, in de buitenkleur; de
+      // nisplaten lopen door de opening tot gelijk met de voorkant (voorkanten met kantenband), met Clamex en deuvels.
+      // Inhoud: open met legplanken, een inliggende deur of inliggende lades (gelijk met de voorkant, voeg rondom).
       if (nis) {
-        const pre = rd.nis.inhoud === 'lades' ? 'onder-lades' : rd.nis.inhoud === 'deur' ? 'onder-greep' : 'open';
-        const nk = Object.assign(newCabinet(pre), { code: `${k.code}-nis`, breedte: nis.nb, hoogte: nis.nh, diepte: nis.ndp, plintHoogte: 0, plint: 'geen',
-          greep: k.greep, greepHart: k.greepHart, front: 'opliggend', decorKorpus: k.decorKorpus, decorFront: k.decorFront, rug: 'groef' });
-        if (rd.nis.inhoud === 'lades') nk.secties = [sec('lade', { lades: Math.max(1, Number(rd.nis.lades) || 2) })];
-        else if (rd.nis.inhoud === 'deur') nk.secties = [sec('deur', { legplanken: Math.max(0, Number(rd.nis.legplanken ?? 1)) })];
-        else nk.secties = [sec('open', { legplanken: Math.max(0, Number(rd.nis.legplanken ?? 1)) })];
-        const sub = buildCabinet(nk, S);
-        if (sub.error) warnings.push(`Nis: ${sub.error}`);
-        else {
-          // Nis-kast: x' (breedte) langs z, z' (diepte, naar voor) naar buiten (-xl), y' boven op nis.ny.
-          for (const q of sub.parts) {
-            const b = q.box;
-            const xl0 = xFP + (nis.ndp - (b.z + b.d)), xl1 = xFP + (nis.ndp - b.z);
-            const nb = { x: Math.min(X(xl0), X(xl1)), y: nis.ny + b.y, z: zc - nis.nb / 2 + b.x, w: Math.abs(X(xl1) - X(xl0)), h: b.h, d: b.w };
-            const np = { ...q, id: `nis-${q.id}`, naam: `Nis: ${q.naam}`, box: nb, shape3d: undefined, shape: q.shape };
-            delete np.tilt;
-            add(np);
-          }
-          for (const h of sub.hardware) count(h.naam, h.aantal);
-          for (const b of sub.bestel) order(b.naam, b.aantal);
-          for (const w of sub.warnings) if (!/^Ronde/.test(w)) warnings.push(`Nis: ${w}`);
-          warnings.push(`Nis in de ronde kop: ${r1(nis.nb)} × ${r1(nis.nh)} (vanaf ${r1(nis.ny)} boven de onderkant), ${r1(nis.ndp)} diep, ${rd.nis.inhoud === 'lades' ? 'met lades' : rd.nis.inhoud === 'deur' ? 'met deur' : 'open'}. De opening wordt uit de rechte voorkant gefreesd; de HPL daar uitsnijden.`);
+        const { nb, nh, ny, ndp } = nis;
+        const xF = cx - R, xB = xF + ndp;                    // voorkant (gelijk met de HPL), voorvlak van de nisrug
+        const z0 = zc - nb / 2 - t, z1 = zc + nb / 2 + t, bandN = S.bandFront;
+        const nisPart = (naam, extra, xa, xb2, za, zb, ya, yb) => add({ naam, rol: 'nis', mat: 'rond', dikte: t, edges: {}, ...extra,
+          box: { x: Math.min(X(xa), X(xb2)), y: ya, z: za, w: Math.abs(X(xb2) - X(xa)), h: yb - ya, d: zb - za } });
+        const bodem = nisPart('Nis: bodem', { grain: 'u', edges: { v1: bandN } }, xF, xB, z0, z1, ny - t, ny);
+        const nisTop = nisPart('Nis: top', { grain: 'u', edges: { v1: bandN } }, xF, xB, z0, z1, ny + nh, ny + nh + t);
+        for (const q of [bodem, nisTop]) { q.uLen = nb + 2 * t; q.vLen = ndp; }
+        const zijL = nisPart('Nis: zijkant', { grain: 'v', edges: { u1: bandN } }, xF, xB, z0, z0 + t, ny, ny + nh);
+        const zijR = nisPart('Nis: zijkant', { grain: 'v', edges: { u1: bandN } }, xF, xB, z1 - t, z1, ny, ny + nh);
+        for (const q of [zijL, zijR]) { q.uLen = ndp; q.vLen = nh; }
+        const rugN = nisPart('Nis: rug', { grain: 'v' }, xB, xB + t, z0, z1, ny - t, ny + nh + t);
+        rugN.uLen = nb + 2 * t; rugN.vLen = nh + 2 * t;
+        // Sponning vooraan aan de buitenkant van bodem, top en zijkanten (zoals de plaat tegen de kast): sp diep, zo breed
+        // als de voorplaat + HPL; de rand van de opening in de voorplaat zit erin, vooraan blijft t − sp van de nisplaat.
+        const rw = t + hp;
+        for (const [q, face] of [[bodem, 'onder'], [nisTop, 'boven']]) {
+          const vc = ndp - rw / 2 + 5;
+          q.ops.push({ kind: 'groef', face, frees: true, u1: -10, v1: vc, u2: q.uLen + 10, v2: vc, breedte: rw + 10, diepte: sp, naam: 'Sponning voorplaat' });
         }
+        for (const q of [zijL, zijR]) {
+          const uc = ndp - rw / 2 + 5;
+          q.ops.push({ kind: 'groef', face: 'voor', frees: true, u1: uc, v1: -10, u2: uc, v2: q.vLen + 10, breedte: rw + 10, diepte: sp, naam: 'Sponning voorplaat' });
+        }
+        // Zijkanten op bodem en top; bodem, top en zijkanten tegen de nisrug.
+        for (const zs of [zijL, zijR]) {
+          const zcS = zs.box.z + t / 2;
+          for (const c of clamexPositions(ndp - 20, S)) {
+            join2(zs, 'v0', c + 10, 0, ndp, bodem, 'boven', zcS - bodem.box.z, c + 10, [0, 1]);
+            join2(zs, 'v1', c + 10, 0, ndp, nisTop, 'onder', zcS - nisTop.box.z, c + 10, [0, 1]);
+          }
+          for (const c of clamexPositions(nh, S)) join2(zs, 'u0', c, 0, nh, rugN, 'voor', zcS - rugN.box.z, ny + c - rugN.box.y, [0, 1]);
+        }
+        for (const [q, yc] of [[bodem, ny - t / 2], [nisTop, ny + nh + t / 2]])
+          for (const c of clamexPositions(nb + 2 * t - 40, S)) join2(q, 'v0', c + 20, 0, nb + 2 * t, rugN, 'voor', c + 20, yc - rugN.box.y, [1, 0]);
+        const inhoud = rd.nis.inhoud ?? 'open';
+        const v = S.voeg;
+        if (inhoud === 'open') {
+          // Legplanken op dragers in de nis-zijkanten.
+          const n = Math.max(0, Number(rd.nis.legplanken ?? 1));
+          for (let j = 1; j <= n; j++) {
+            const yy = ny + j * nh / (n + 1) - t / 2;
+            const lp = add({ naam: 'Nis: legplank', rol: 'legplank', mat: 'rond', dikte: t, grain: 'u', bandPlaat: true, edges: { v1: bandN },
+              box: { x: Math.min(X(xF + 10), X(xB)), y: yy, z: z0 + t + S.legplankSpeling, w: Math.abs(X(xB) - X(xF + 10)), h: t, d: nb - 2 * S.legplankSpeling }, uLen: nb - 2 * S.legplankSpeling, vLen: ndp - 10 });
+            void lp;
+            for (const zs of [zijL, zijR]) for (const uu of [40, ndp - 40]) zs.ops.push({ kind: 'boring', face: 'binnen', u: uu, v: yy - ny, dia: 5, diepte: 12, naam: 'Legplankdrager' });
+            count('Legplankdrager', 4);
+          }
+        } else if (inhoud === 'deur') {
+          // Inliggende deur, gelijk met de voorkant; scharnieren aan de gekozen kant, montageplaten op de nis-zijkant.
+          const links = (rd.nis.scharnier ?? 'links') === 'links';
+          const dw = nb - 2 * v, dh = nh - 2 * v;
+          const deur = add({ naam: 'Nis: deur', rol: 'front', mat: 'front', dikte: fd, grain: 'v', edges: { u0: S.bandFront, u1: S.bandFront, v0: S.bandFront, v1: S.bandFront },
+            box: { x: Math.min(X(xF), X(xF + fd)), y: ny + v, z: zc - dw / 2, w: fd, h: dh, d: dw }, uLen: dw, vLen: dh });
+          const hc = hingeCount(dh, dw);
+          const pos = Array.from({ length: hc }, (_, j) => S.scharnierRand + j * (dh - 2 * S.scharnierRand) / Math.max(1, hc - 1));
+          const zs = links ? zijL : zijR;
+          for (const pv of pos) {
+            const cu = links ? S.potRand + S.potDia / 2 : dw - S.potRand - S.potDia / 2;
+            deur.ops.push({ kind: 'boring', face: 'binnen', u: cu, v: pv, dia: S.potDia, diepte: S.potDiepte, naam: 'Scharnierpot' });
+            for (const dv of [-S.montageplaatTussen / 2, S.montageplaatTussen / 2]) zs.ops.push({ kind: 'boring', face: 'binnen', u: ndp - fd - S.montageplaatVoor, v: v + pv + dv, dia: S.montageplaatDia, diepte: S.montageplaatDiepte, naam: 'Montageplaat' });
+            count('Scharnier Blum inliggend (snelspan)'); count('Montageplaat');
+          }
+          if (k.greep === 'push') count('Push-open drevel');
+        } else {
+          // Inliggende lades: fronten in de opening, de lades op maat bestellen (NL volgens de nisdiepte).
+          const n = Math.max(1, Number(rd.nis.lades) || 2);
+          const fh = (nh - (n + 1) * v) / n, fw = nb - 2 * v;
+          const nlN = NL_LIST.filter(x => x <= ndp - fd - 10).pop();
+          for (let j = 0; j < n; j++) {
+            add({ naam: `Nis: ladefront ${j + 1}`, rol: 'front', mat: 'front', dikte: fd, grain: 'v', edges: { u0: S.bandFront, u1: S.bandFront, v0: S.bandFront, v1: S.bandFront },
+              box: { x: Math.min(X(xF), X(xF + fd)), y: ny + v + j * (fh + v), z: zc - fw / 2, w: fd, h: fh, d: fw }, uLen: fw, vLen: fh });
+          }
+          order(`Lade op maat voor de nis (${k.code}): ${n}× inliggend, binnenbreedte nis ${r1(nb)}, NL ${nlN ?? '?'}`, n);
+          warnings.push('Nis met lades: de geleiders worden in de nis-zijkanten gemonteerd volgens de lade (geen boringen voorzien).');
+        }
+        warnings.push(`Nis in de ronde kop: ${r1(nb)} × ${r1(nh)} binnenmaat (vanaf ${r1(ny)} boven de onderkant), ${r1(ndp)} diep, ${inhoud === 'lades' ? 'met inliggende lades' : inhoud === 'deur' ? 'met inliggende deur' : 'open'}. Nisplaten in de buitenkleur tot gelijk met de voorkant, met een sponning (${sp} diep) waar de rand van de voorplaat in zit; HPL tot tegen de rand van de nisplaten.`);
       }
       // Buigtriplex: in de sponningen van bodem en top (sp diep) en van de rechte stukken; op maat (afgewikkeld).
       // Met een recht stuk tussen de bogen: twee stukken (één per boog), anders één.
@@ -1931,8 +2055,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
               if (xw1 - xw0 > 40) add({ ...mp, naam: 'Plintenbak ronde kant (tegen de muur)', box: { x: Math.min(X(xw0), X(xw1)), y: yb0, z: zBack, w: xw1 - xw0, h: hb, d: bt }, uLen: xw1 - xw0, vLen: hb });
             }
             const sdp = Math.min(S.rondStaanderBreedte, Rpr * 0.4), hw = bt / 2;
-            for (const { a, ccz } of alongArcs(Rpr, S.rondStaanderAfstand)) {
-              const { ca, sa, ox, quad } = studQuad(a, ccz, Rpr - sdp, Rpr, hw);
+            for (const { a, ccz, off = 0 } of alongArcs(Rpr, S.rondStaanderAfstand)) {
+              const { ca, sa, ox, quad } = studQuad(a, ccz, Rpr - sdp, Rpr, hw, off);
               const stp = shaped({ ...mp, naam: 'Opstaander ronde plint', grain: 'v', y: yb0, h: hb }, quad);
               stp.uLen = sdp; stp.vLen = hb;
               for (const [edge, lv, face] of [['v0', pribs[0], 'boven'], ['v1', pribs[1], 'onder']]) {
@@ -1970,7 +2094,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       }
     }
     if (kop2) warnings.push(`Kop over 2 kasten: ${mid ? `bogen R ${r1(R)} met ${r1(czF - czB)} mm recht ertussen` : 'één halfrond'} tot de front van de kast erachter (rug aan rug, zelfde diepte, 180° gedraaid). De Clamex in de zijwand van die kast komen er in de zaaglijst en de MPR-bestanden van het project bij.`);
-    warnings.push(`Ronde kant ${rd.kant}: ${kop2 ? 'kop over 2 kasten' : half ? 'halfrond' : `kwartrond R ${r1(R)}`}, ${open ? 'open met ronde legplanken' : `dicht: plaat tegen de kast, ${half ? '' : 'plaat tegen de muur, '}top, bodem${tail ? ' en rechte zijkant' : ''}${mid ? ' en rechte voorkant' : ''} vol met sponning ${S.rondSponningBreedte} × ${sp}, ${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL`}. Kies buigtriplex dat rond een staande as buigt.`);
+    warnings.push(`Ronde kant ${rd.kant}: ${vrij ? `vrije vorm ${(VRIJE_VORMEN[rd.vrijVorm] ?? VRIJE_VORMEN.ellips).naam.toLowerCase()}, ${r1(Number(rd.uitsteek) || 300)} uitsteek` : kop2 ? 'kop over 2 kasten' : half ? 'halfrond' : `kwartrond R ${r1(R)}`}, ${open ? 'open met ronde legplanken' : `dicht: plaat tegen de kast, ${half ? '' : 'plaat tegen de muur, '}top, bodem${tail ? ' en rechte zijkant' : ''}${mid ? ' en rechte voorkant' : ''} vol met sponning ${S.rondSponningBreedte} × ${sp}, ${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL`}. Kies buigtriplex dat rond een staande as buigt.`);
   }
 
   // Paslat boven (bv. tot het plafond): frontpaslat boven de fronten over de volle breedte (ook over de paslatten
@@ -2359,7 +2483,8 @@ function kopPartner(project, layout, k) {
     const cs = [[0, 0], [Wb, 0], [Wb, Db], [0, Db]].map(([x, z]) => loc([Lb.x + x * Math.cos(rb) + z * Math.sin(rb), Lb.z - x * Math.sin(rb) + z * Math.cos(rb)]));
     const xs = cs.map(c => c[0]), zs = cs.map(c => c[1]);
     if (Math.abs(Math.max(...zs)) > 3) return false;                       // rug tegen rug (z = 0)
-    return k.rond.kant === 'links' ? Math.abs(Math.min(...xs)) < 3 : Math.abs(Math.max(...xs) - W) < 3;
+    const l = Math.abs(Math.min(...xs)) < 3, r = Math.abs(Math.max(...xs) - W) < 3;
+    return k.rond.kant === 'beide' ? l || r : k.rond.kant === 'links' ? l : r;
   }) ?? null;
 }
 
@@ -2603,23 +2728,31 @@ function werkbladGeometry(project, S) {
     // Ronde kant aan het uiteinde van de rij: het werkblad volgt de ronding (kwartrond: zelfde middelpunt, overstek
     // zoals vooraan; halfrond: halve cirkel over de diepte van het werkblad). De boog wordt gefreesd.
     for (const [c, kant] of [[first, 'links'], [last, 'rechts']]) {
-      let rd = c.k.rond;
+      let rd = c.k.rond && (c.k.rond.kant === kant || c.k.rond.kant === 'beide') ? { ...c.k.rond, kant } : null;
       // De kast achter een kop over 2 kasten: haar werkblad krijgt de andere helft van de ronding.
-      if (rd?.kant !== kant) {
-        const owner = project.kasten.find(o => o.rond?.vorm === 'kop2' && o.rond.kant !== kant && kopPartner(project, layout, o) === c.k);
+      if (!rd) {
+        const owner = project.kasten.find(o => o.rond?.vorm === 'kop2' && (o.rond.kant === 'beide' || o.rond.kant !== kant) && kopPartner(project, layout, o) === c.k);
         if (!owner) continue;
         rd = { ...owner.rond, kant, vorm: 'kop2' };
       }
       const sg = kant === 'links' ? -1 : 1;
       // Middelpunt van de boog: buiten de zijwand, voorbij de rechte strook (dicht).
       const zf0 = c.z + Number(c.k.diepte) + (c.k.front === 'inliggend' ? 0 : fd), diep0 = zf0 - c.z;
+      const xc0 = kant === 'links' ? c.x : c.x + Number(c.k.breedte);
       const R0 = rd.vorm === 'kop2' ? Math.max(50, Math.min(Number(rd.radius) || diep0, diep0)) : rd.vorm === 'half' ? diep0 / 2 : Math.max(50, Math.min(Number(rd.radius) || Math.min(300, diep0), diep0));
       const Bw0 = Math.max(R0 + (rd.uitvoering === 'open' ? 0 : S.plaat), Number(rd.breedte) || 0);
       const xc = (kant === 'links' ? c.x : c.x + Number(c.k.breedte)) + sg * (Bw0 - R0);
       const zf = c.z + Number(c.k.diepte) + (c.k.front === 'inliggend' ? 0 : fd), diep = zf - c.z;
       const n = 24;
       let pts, arc;
-      if (rd.vorm === 'half') {
+      if (rd.vorm === 'vrij') {
+        // Vrije vorm: de buitenkant van de kast + overstek, binnen de diepte van het werkblad.
+        const open = rd.uitvoering === 'open', tp = open ? 0 : S.plaat;
+        const cxL = -tp, A = Math.max(40, (Number(rd.uitsteek) || 300) - tp);
+        const base = vrijeVormLijn(rd, zf0, c.z, cxL, A);
+        const ws = offsetLijn(base, -(az1 - zf0)).map(([dx, z]) => [xc0 - sg * dx, Math.max(az0, Math.min(az1, z))]);
+        arc = ws.slice().reverse(); pts = arc;
+      } else if (rd.vorm === 'half') {
         const zc = (az0 + az1) / 2, rr = (az1 - az0) / 2;
         pts = arc = Array.from({ length: n + 1 }, (_, i) => { const a = 1.5 * Math.PI - Math.PI * i / n; return [xc - sg * rr * Math.cos(a), zc + rr * Math.sin(a)]; });
       } else {
