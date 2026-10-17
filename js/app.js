@@ -130,9 +130,10 @@ const Projects = {
               <button class="row button" type="button" id="pj-mpr"><span class="icon-label">${icon('download')}MPR-bestanden (woodWOP)</span></button>
               <button class="row button" type="button" id="pj-csv"><span class="icon-label">${icon('table')}Zaaglijst STK (Schelling HPO)</span></button>
               <button class="row button" type="button" id="pj-tek"><span class="icon-label">${icon('ruler')}Montagetekening (PDF, A3)</span></button>
+              <button class="row button" type="button" id="pj-scan"><span class="icon-label">${icon('list')}Scancodes (PDF)</span></button>
               <button class="row button" type="button" id="pj-import"><span class="icon-label">${icon('copy')}Kasten uit ander project toevoegen</span></button>
               <button class="row button" type="button" id="pj-share"><span class="icon-label">${icon('share')}Projectbestand delen</span></button>
-            </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand: één map met de naam van het project, elk bestand begint met het kastnummer (bv. K01_stijl_links).</div></div>
+            </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand: één map met de naam van het project (zonder spaties), elk programma met een korte naam: kastnummer + onderdeel + volgnummer (bv. K01ZWL1 = zijwand links van K01). Dezelfde namen staan als barcode op de etiketten en op het blad met de scancodes.</div></div>
           </div>
         </div>
       </div>`;
@@ -163,6 +164,10 @@ const Projects = {
     $('#pj-select', v)?.addEventListener('click', () => { this.selectMode = !this.selectMode; this.selected = new Set(); this.keepCamera = true; this.renderProject(); });
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));
     $('#pj-tek', v).addEventListener('click', () => { const d = technicalDrawingPdf(p, S()); shareFile(d.blob, d.name); });
+    $('#pj-scan', v).addEventListener('click', () => {
+      if (!p.kasten.length) { alertBox('Geen kasten', 'Voeg eerst kasten toe aan het project.'); return; }
+      const d = scanCodesFor(p, cutRows(p).rows); shareFile(d.blob, d.name);
+    });
     $('#pj-csv', v).addEventListener('click', () => {
       if (!p.kasten.length) { alertBox('Geen kasten', 'Voeg eerst kasten toe aan het project.'); return; }
       const stk = cutListStk(p, cutRows(p).rows);
