@@ -2109,7 +2109,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   }
 
   // Paslat boven (bv. tot het plafond): frontpaslat boven de fronten over de volle breedte (ook over de paslatten
-  // aan de zijkant) en een liggende kastpaslat op de kast, met Clamex; van buitenaf vastzetten (geen gaten in de kast).
+  // aan de zijkant) en een liggende kastpaslat op de kast, met Clamex ertussen (geen opstaande latjes); van buitenaf
+  // vastzetten (geen gaten in de kast).
   const ph = Number(k.paslat?.boven) || 0;
   if (ph > 0) {
     if (lr || vb) warnings.push('Paslat boven: niet bij een schuine kast.');
@@ -2122,25 +2123,18 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const fpB = add({ id: 'paslat-front-boven', naam: 'Frontpaslat boven', rol: 'paslat', mat: 'front', dikte: fd, grain: 'u',
         edges: { u0: S.bandFront, u1: S.bandFront, v0: S.bandFront, v1: 0 },
         box: { x: x0, y: yF, z: zFP, w: x1 - x0, h: top - yF, d: fd }, uLen: x1 - x0, vLen: top - yF });
-      // Kastpaslatten rechtop op de kast (haaks op de frontpaslat, zoals aan de zijkant): aan elk uiteinde en ongeveer
-      // om de 600 mm, met een Clamex op halve hoogte.
-      const kd = Math.min(S.paslatDiepte, zFP), hk = top - H;
+      // Alleen een liggende kastpaslat (plat op de kast, haaks op de frontpaslat) en de frontpaslat, met Clamex tussen
+      // die twee lange stukken: in de voorkant van de kastpaslat en in het vlak van de frontpaslat, onderaan.
+      const kd = Math.min(S.paslatDiepte, zFP);
       if (top - yF < 40) warnings.push('Paslat boven: de frontpaslat is erg smal.');
-      if (hk - t < 40) warnings.push('Paslat boven: te laag voor rechte kastpaslatten met Clamex; de frontpaslat op de liggende kastpaslat lijmen of schroeven.');
-      // Liggende kastpaslat over de volle breedte (plat op de kast, zodat alles vlak ligt), met daarop de rechte stukken.
-      add({ id: 'paslat-kast-boven', naam: 'Kastpaslat boven (liggend)', rol: 'paslat', mat: 'korpus', dikte: t, grain: 'u', edges: {},
+      const kpB = add({ id: 'paslat-kast-boven', naam: 'Kastpaslat boven (liggend)', rol: 'paslat', mat: 'korpus', dikte: t, grain: 'u', edges: {},
         box: { x: 0, y: H, z: zFP - kd, w: W, h: t, d: kd }, uLen: W, vLen: kd });
-      const hs = hk - t;                                       // hoogte van de rechte stukken op de liggende lat
-      const nP = Math.max(2, Math.ceil((W - t) / S.plintBakAfstand) + 1);
-      for (let i = 0; i < nP && hs >= 20; i++) {
-        const px = i * (W - t) / (nP - 1);
-        const kp = add({ id: `paslat-kast-boven-${i + 1}`, naam: `Kastpaslat boven ${i + 1} (rechtop)`, rol: 'paslat', mat: 'korpus', dikte: t, grain: 'v', edges: {},
-          box: { x: px, y: H + t, z: zFP - kd, w: t, h: hs, d: kd }, uLen: kd, vLen: hs });
-        if (hs >= 40) {
-          kp.ops.push({ kind: 'clamex', edge: 'u1', pos: hs / 2, naam: 'Clamex' });
-          fpB.ops.push({ kind: 'clamex', face: 'binnen', u: px + t / 2 - x0, v: H + t + hs / 2 - yF, dir: [0, 1], naam: 'Clamex' });
-          count('Lamello Clamex P-14');
-        }
+      const vC = H + t / 2 - yF;                              // hart van de Clamex in de frontpaslat, vanaf de onderkant
+      if (vC < 6) warnings.push('Paslat boven: de frontpaslat begint te hoog boven de kastpaslat voor Clamex (fronten steken boven uit?); de frontpaslat lijmen of schroeven.');
+      else for (const c of clamexPositions(W, S)) {
+        kpB.ops.push({ kind: 'clamex', edge: 'v1', pos: c, naam: 'Clamex' });
+        fpB.ops.push({ kind: 'clamex', face: 'binnen', u: c - x0, v: vC, dir: [1, 0], naam: 'Clamex' });
+        count('Lamello Clamex P-14');
       }
     }
   }
