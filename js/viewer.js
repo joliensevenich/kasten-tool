@@ -26,15 +26,18 @@ function shapeGeometry(p) {
     : [b.x + u - c[0], b.y + v - c[1], b.z + e - c[2]];
   const th = plane === 'zy' ? b.w : plane === 'xz' ? b.h : b.d;
   const pts = p.shape3d?.pts ?? p.shape;
+  const holes = p.shape3d?.holes ?? [];                    // openingen in het paneel (bv. de nis in een ronde kop)
+  const all = [pts, ...holes].flat();
   const pos = [];
   const tri = (a, b2, c2) => pos.push(...a, ...b2, ...c2);
   // Boven- en onderkant: driehoeken (ook voor een L-vorm, niet alleen bolle vormen).
-  for (const [i, j, q] of THREE.ShapeUtils.triangulateShape(pts.map(([u, v]) => new THREE.Vector2(u, v)), [])) {
-    tri(at(pts[i], 0), at(pts[q], 0), at(pts[j], 0));
-    tri(at(pts[i], th), at(pts[j], th), at(pts[q], th));
+  const V = q => q.map(([u, v]) => new THREE.Vector2(u, v));
+  for (const [i, j, q] of THREE.ShapeUtils.triangulateShape(V(pts), holes.map(V))) {
+    tri(at(all[i], 0), at(all[q], 0), at(all[j], 0));
+    tri(at(all[i], th), at(all[j], th), at(all[q], th));
   }
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], n = pts[(i + 1) % pts.length];
+  for (const ring of [pts, ...holes]) for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], n = ring[(i + 1) % ring.length];
     tri(at(a, 0), at(n, 0), at(n, th));
     tri(at(a, 0), at(n, th), at(a, th));
   }

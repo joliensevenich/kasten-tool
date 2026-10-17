@@ -10,6 +10,7 @@ const MPR_DEFAULTS = {
   freesKlein: '156',        // Ø8: led-groeven en kleine kamers
   freesContour: '130',      // wisselmesfrees Ø18 rechtsdraaiend: uitsparingen en contouren
   freesContourLinks: '150', // wisselmesfrees Ø18 linksdraaiend
+  freesTrespa: '200',       // Trespafrees
   freesRichting: 'gelijkloop', // contour: het afgewerkte stuk in gelijkloop (minder uitbrokkelen), of 'tegenloop'
   groefMethode: 'zaag',     // 'zaag' (Nuten) of 'frees' (Tasche)
   schuinMethode: 'frees',   // schuine kanten: 'frees' (130) of 'zaag' (300, Kontursaegen niet getest); de rug wordt altijd gefreesd
@@ -350,13 +351,13 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
       const dirs = P.slice(1).map((q, i) => { const l = Math.hypot(q[0] - P[i][0], q[1] - P[i][1]) || 1; return [(q[0] - P[i][0]) / l, (q[1] - P[i][1]) / l]; });
       const [wx, wy] = mpC(...op.waste);
       const left = -dirs[0][1] * (wx - P[0][0]) + dirs[0][0] * (wy - P[0][1]) > 0;   // afval links van de baan?
-      const frees = P.length > 2 || p.rol === 'rug' || p.rol === 'werkblad' || M.schuinMethode === 'frees';
+      const frees = P.length > 2 || op.tool === 'trespa' || p.rol === 'rug' || p.rol === 'werkblad' || M.schuinMethode === 'frees';
       const tools = M.tools ?? P110_TOOLS;
       // Draairichting tegen uitbrokkelen: het afgewerkte stuk aan de kant van gelijkloop. Een rechtsdraaiende frees
       // (130) loopt in gelijkloop aan zijn linkerkant, een linksdraaiende (150) aan zijn rechterkant.
       const stukLinks = !left;
       const gelijk = (M.freesRichting ?? 'gelijkloop') === 'gelijkloop';
-      const tno = frees ? (stukLinks === gelijk ? (M.freesContour ?? '130') : (M.freesContourLinks ?? '150')) : (M.zaagSchuin ?? '300');
+      const tno = op.tool === 'trespa' ? (M.freesTrespa ?? '200') : frees ? (stukLinks === gelijk ? (M.freesContour ?? '130') : (M.freesContourLinks ?? '150')) : (M.zaagSchuin ?? '300');
       const tool = tools.find(x => String(x.nr) === String(tno));
       const half = frees ? (Number(tool?.dia) || 18) / 2 : (Number(tool?.lengte) || 3.4) / 2;
       const nrm = ([dx, dy]) => (left ? [-dy * half, dx * half] : [dy * half, -dx * half]);
@@ -518,8 +519,8 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
   sides.B.push(...contoursB);
   const files = [];
   const make = (ops, suffix) => files.push({ name: `${baseName}${suffix}.mpr`, text: mprHeader(fr.L, fr.B, D) + '\r\n' + ops.join('\r\n') + '!\r\n' });
-  make(sides.A, sides.B.length ? '_A' : '');
-  if (sides.B.length) make(sides.B, '_B');
+  make(sides.A, sides.B.length ? 'A' : '');
+  if (sides.B.length) make(sides.B, 'B');
   return { files, skipped, frame: fr };
 }
 
@@ -528,10 +529,31 @@ function mprForPart(p, M = MPR_DEFAULTS, baseName = p.id) {
 const mprCode = code => String(code || 'K').replace(/^([A-Za-z]+)(\d)$/, '$10$2');
 
 /** Bestandsnaam van een paneel: kastnummer + onderdeel, bv. K01_stijl_links (zijwand = stijl). */
+/**
+ * Korte programmanaam (voor de barcode op het etiket, hoogstens 20 tekens met .mpr): kastnummer + 3 letters voor het
+ * onderdeel (zoals K02BOD), het volgnummer komt erachter (mprNames) en A/B voor de zijde (mprForPart).
+ */
+const MPR_AFK = [
+  [/^nis: /, 'N'], [/^zijwand links/, 'ZWL'], [/^zijwand rechts/, 'ZWR'], [/^zijpaneel/, 'ZPA'], [/^vaste legplank/, 'VLP'], [/^legplank/, 'LEG'],
+  [/^tussenbodem/, 'TBO'], [/^bodem/, 'BOD'], [/^top/, 'TOP'], [/^voorregel/, 'RGV'], [/^achterregel/, 'RGA'], [/regel/, 'REG'],
+  [/^wegneembare rug/, 'RUW'], [/^rug/, 'RUG'], [/^middenstijl/, 'STL'], [/^deur/, 'DEU'], [/^klep/, 'KLP'], [/^ladefront|^front/, 'LAF'],
+  [/^binnenfront/, 'BIF'], [/^lade/, 'LAD'], [/^plintenbak/, 'PBK'], [/^plintrib/, 'PRB'], [/^plint/, 'PLI'], [/^trespa/, 'TRE'],
+  [/^greeplijst/, 'GRL'], [/paslat/, 'PAS'], [/^lat/, 'LAT'], [/^opstaander/, 'OPS'], [/^rib/, 'RIB'], [/^ronde bodem/, 'RBO'],
+  [/^ronde top/, 'RTO'], [/^ronde legplank/, 'RLE'], [/^plaat ronde kant/, 'RPK'], [/^plaat tegen de muur/, 'RPM'], [/^rechte/, 'RRE'],
+  [/^middenplaat/, 'RMP'], [/^opvul|^blok/, 'OPV'], [/^binnenwand/, 'BIW'], [/^werkblad/, 'WBL'],
+];
 function mprPartName(code, p) {
-  const naam = String(p.naam).toLowerCase().replace(/^zijwand/, 'stijl').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[()]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-  return `${mprCode(code)}_${naam}`;
+  const naam = String(p.naam).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let afk = '';
+  for (const [re, a] of MPR_AFK) {
+    if (!re.test(naam)) continue;
+    afk = a;
+    // Nis: N + de afkorting van het onderdeel in de nis.
+    if (a === 'N') { const rest = naam.replace(/^nis: /, ''); afk = 'N' + (MPR_AFK.find(([r2, a2]) => a2 !== 'N' && r2.test(rest))?.[1] ?? rest.replace(/[^a-z]/g, '').slice(0, 2).toUpperCase()); }
+    break;
+  }
+  if (!afk) afk = naam.replace(/[^a-z]/g, '').slice(0, 3).toUpperCase() || 'DEL';
+  return `${mprCode(code).replace(/[^A-Za-z0-9]/g, '')}${afk}`;
 }
 
 /** Namen van de MPR-programma's van een kast (uniek binnen de kast): Map(onderdeel-id → naam). */
@@ -539,21 +561,47 @@ function mprNames(code, parts) {
   const out = new Map(), used = new Map();
   for (const p of parts) {
     if (!p.ops.length && p.rol !== 'zijwand') continue;
-    let n = mprPartName(code, p);
-    const c = (used.get(n) ?? 0) + 1;
-    used.set(n, c);
-    if (c > 1) n = `${n}_${c}`;
-    out.set(p.id, n);
+    const b = mprPartName(code, p);
+    const c = (used.get(b) ?? 0) + 1;
+    used.set(b, c);
+    out.set(p.id, `${b}${c}`);
   }
   return out;
 }
+
+/**
+ * Programma's per onderdeel van het project (zoals in de MPR-zip): Map(onderdeel → { files: [namen], key: inhoud }).
+ * Gebruikt voor de barcodes in de STK en om in de zaaglijst alleen gelijke programma's samen te voegen.
+ */
+function projectPrograms(project, S, M, items = projectParts(project, S)) {
+  const out = new Map();
+  for (const { k, res, parts } of items) {
+    if (res.error) continue;
+    const names = mprNames(k.code, parts);
+    for (const p of parts) {
+      if (!names.has(p.id) || !p.ops.length) continue;
+      const { files } = mprForPart(p, M, names.get(p.id));
+      out.set(p, { files: files.map(f => f.name), key: files.map(f => f.text).join('|') });
+    }
+  }
+  if (typeof werkbladGeometry === 'function') werkbladGeometry(project, S).forEach((g, i) => {
+    const p = g.parts.find(q => q.rol === 'werkblad');
+    if (!p || p.materiaal !== 'plaat' || !p.ops.length) return;
+    const { files } = mprForPart(p, M, `WB${String(i + 1).padStart(2, '0')}`);
+    out.set(p, { files: files.map(f => f.name), key: files.map(f => f.text).join('|') });
+  });
+  return out;
+}
+
+/** Map van de programma's: de projectnaam zonder spaties (de scanner leest geen spaties in de barcode). */
+const programFolder = project => safeName(project.naam || 'Project').replace(/\s+/g, '_');
 
 function projectMprZip(project, S, M) {
   const zip = new ZipWriter();
   const notes = [];
   let count = 0;
   // Alles in één map met de naam van het project; elk bestand begint met het kastnummer.
-  const dir = safeName(project.naam || 'Project');
+  const dir = programFolder(project);
   // Met de doorlopende stukken (plint, greeplijst, paslat boven) zoals in de zaaglijst.
   for (const { k, res, parts } of projectParts(project, S)) {
     if (res.error) { notes.push(`${k.code}: ${res.error}`); continue; }
@@ -577,7 +625,7 @@ function projectMprZip(project, S, M) {
     werkbladGeometry(project, S).forEach((g, i) => {
       const p = g.parts.find(q => q.rol === 'werkblad');
       if (!p || p.materiaal !== 'plaat' || !p.ops.length) return;
-      const { files, skipped } = mprForPart(p, M, `WB${String(i + 1).padStart(2, '0')}_${safeName(p.naam)}`);
+      const { files, skipped } = mprForPart(p, M, `WB${String(i + 1).padStart(2, '0')}`);
       for (const f of files) { zip.add(`${dir}/${f.name}`, f.text); count++; }
       for (const s2 of new Set(skipped)) notes.push(`${p.naam}: ${s2.replace('Let op: ', '')}`);
       if (p.uLen > 3000) notes.push(`${p.naam}: ${Math.round(p.uLen)} mm lang, controleer of het op de P110 past.`);
@@ -587,7 +635,7 @@ function projectMprZip(project, S, M) {
     `MPR-bestanden voor ${project.naam}`,
     `Gemaakt met de Kasten tool op ${new Date().toLocaleString('nl-BE')}.`,
     '',
-    'Eén bestand per paneel, met het kastnummer vooraan (bv. K01_stijl_links). Zijn er bewerkingen aan twee zijden, dan zijn er twee bestanden: _A (eerst) en _B (paneel gekeerd om de lange kant).',
+    'Eén bestand per paneel met een korte naam: kastnummer, 3 letters voor het onderdeel en een volgnummer (bv. K02BOD1 = bodem van K02, K02ZWL1 = zijwand links). Zijn er bewerkingen aan twee zijden, dan zijn er twee bestanden: A (eerst) en B (paneel gekeerd om de lange kant). Dezelfde namen staan als barcode op de etiketten van de zaag.',
     'Ligging: X langs de lengte (nerf), Y dwars, nulpunt linksvoor, zijde A naar boven.',
     '',
     'Controleer elk programma eerst in de simulatie van woodWOP.',

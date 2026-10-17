@@ -129,7 +129,7 @@ const Projects = {
               <button class="row button" type="button" id="pj-plan"><span class="icon-label">${icon('explode')}Zaagplan (platen)</span></button>
               <button class="row button" type="button" id="pj-mpr"><span class="icon-label">${icon('download')}MPR-bestanden (woodWOP)</span></button>
               <button class="row button" type="button" id="pj-csv"><span class="icon-label">${icon('table')}Zaaglijst STK (Schelling HPO)</span></button>
-              <button class="row button" type="button" id="pj-tek"><span class="icon-label">${icon('ruler')}Technische tekening (PDF)</span></button>
+              <button class="row button" type="button" id="pj-tek"><span class="icon-label">${icon('ruler')}Montagetekening (PDF, A3)</span></button>
               <button class="row button" type="button" id="pj-import"><span class="icon-label">${icon('copy')}Kasten uit ander project toevoegen</span></button>
               <button class="row button" type="button" id="pj-share"><span class="icon-label">${icon('share')}Projectbestand delen</span></button>
             </div><div class="group-footer">De kasten staan in 3D naast elkaar, in de volgorde van de lijst. De MPR-bestanden komen samen in één zipbestand: één map met de naam van het project, elk bestand begint met het kastnummer (bv. K01_stijl_links).</div></div>
@@ -911,11 +911,19 @@ function openCabinet(project, k, selectId = null) {
         <div class="row"><span class="row-label">Zijpaneel rechts (afwerking)</span>${toggleHTML('f-zp-rechts', k.zijpaneel?.rechts)}</div>
         ${k.zijpaneel?.links || k.zijpaneel?.rechts ? row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${S().front} (front)`)) : ''}
         ${row('Ronde kant', selectHTML('f-rondKant', [['', 'Geen'], ['links', 'Links'], ['rechts', 'Rechts']], k.rond?.kant ?? ''))}
-        ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)']], k.rond.vorm ?? 'kwart'))}
-          ${(k.rond.vorm ?? 'kwart') === 'kwart' ? row('Radius (buitenkant)', numHTML('f-rondRadius', k.rond.radius, '300')) : ''}
+        ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)'], ['kop2', 'Halfrond over 2 kasten (kop van een eiland, rug aan rug)']], k.rond.vorm ?? 'kwart'))}
+          ${(k.rond.vorm ?? 'kwart') !== 'half' ? row('Radius (buitenkant)', numHTML('f-rondRadius', k.rond.radius, k.rond.vorm === 'kop2' ? 'halve breedte' : '300')) : ''}
+          ${row('Breedte ronde kant (vanaf de kast)', numHTML('f-rondBreedte', k.rond.breedte, 'radius'))}
           ${row('Uitvoering', selectHTML('f-rondUit', [['dicht', `Dicht: ribben + ${S().rondTriplexLagen} × buigtriplex + HPL`], ['open', 'Open: ronde legplanken']], k.rond.uitvoering ?? 'dicht'))}
+          ${k.rond.vorm === 'kop2' && k.rond.uitvoering !== 'open' ? `<div class="row"><span class="row-label">Nis in het rechte stuk</span>${toggleHTML('f-nisAan', k.rond.nis?.aan)}</div>
+            ${k.rond.nis?.aan ? `${row('Nis: inhoud', selectHTML('f-nisInhoud', [['open', 'Open vak met legplanken'], ['deur', 'Kast met deur'], ['lades', 'Kast met lades']], k.rond.nis.inhoud ?? 'open'))}
+              ${row('Nis: breedte', numHTML('f-nisB', k.rond.nis.breedte, 'recht stuk'))}
+              ${row('Nis: hoogte', numHTML('f-nisH', k.rond.nis.hoogte, '500'))}
+              ${row('Nis: vanaf onderkant kast', numHTML('f-nisY', k.rond.nis.vanOnder, '100'))}
+              ${row('Nis: diepte', numHTML('f-nisD', k.rond.nis.diepte, 'zo diep mogelijk'))}
+              ${(k.rond.nis.inhoud ?? 'open') === 'lades' ? row('Nis: aantal lades', numHTML('f-nisLades', k.rond.nis.lades, '2')) : row('Nis: legplanken', numHTML('f-nisLeg', k.rond.nis.legplanken, '1'))}` : ''}` : ''}
           ${k.rond.uitvoering === 'open' ? row('Ronde legplanken (tussen bodem en top)', numHTML('f-rondLeg', k.rond.legplanken, '2')) : row('HPL decor', decorSelectHTML('f-rondDecor', k.rond.decor ?? '', [['', 'Zoals de fronten']]))}
-          <div class="row"><span class="row-sub">De ronde kant komt buiten de zijwand (ribben met Clamex tegen de zijwand). Plint en werkblad lopen rond mee.</span></div>` : ''}
+          <div class="row"><span class="row-sub">De ronde kant komt buiten de zijwand. Breedte = hoe ver het ronde deel naast de kast uitsteekt (tot de buitenkant); breder dan de radius = vooraan eerst recht, dan de boog. Plint en werkblad lopen rond mee.</span></div>` : ''}
         ${row('Paslat links (breedte)', numHTML('f-paslat-links', k.paslat?.links, 'geen'))}
         ${row('Paslat rechts (breedte)', numHTML('f-paslat-rechts', k.paslat?.rechts, 'geen'))}
         ${row('Paslat boven (hoogte)', numHTML('f-paslat-boven', k.paslat?.boven, 'geen'))}
@@ -977,6 +985,11 @@ function openCabinet(project, k, selectId = null) {
     $('#f-rondVorm', form)?.addEventListener('change', e => { k.rond = { ...k.rond, vorm: e.target.value }; renderForm(); update(); });
     $('#f-rondUit', form)?.addEventListener('change', e => { k.rond = { ...k.rond, uitvoering: e.target.value }; renderForm(); update(); });
     $('#f-rondRadius', form)?.addEventListener('input', e => { k.rond = { ...k.rond, radius: e.target.value === '' ? null : Number(e.target.value) }; update(); });
+    $('#f-nisAan', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { inhoud: 'open', ...(k.rond.nis ?? {}), aan: e.target.checked } }; renderForm(); update(); });
+    $('#f-nisInhoud', form)?.addEventListener('change', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, inhoud: e.target.value } }; renderForm(); update(); });
+    for (const [id, key] of [['f-nisB', 'breedte'], ['f-nisH', 'hoogte'], ['f-nisY', 'vanOnder'], ['f-nisD', 'diepte'], ['f-nisLades', 'lades'], ['f-nisLeg', 'legplanken']])
+      $(`#${id}`, form)?.addEventListener('input', e => { k.rond = { ...k.rond, nis: { ...k.rond.nis, [key]: e.target.value === '' ? null : Number(e.target.value) } }; update(); });
+    $('#f-rondBreedte', form)?.addEventListener('input', e => { k.rond = { ...k.rond, breedte: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     $('#f-rondLeg', form)?.addEventListener('input', e => { k.rond = { ...k.rond, legplanken: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     { const dec = $('#f-rondDecor', form); if (dec) bindDecor(dec, v => { k.rond = { ...k.rond, decor: v || null }; update(); }); }
     for (const kant of ['links', 'rechts', 'boven']) $(`#f-paslat-${kant}`, form)?.addEventListener('input', e => {
@@ -1238,6 +1251,26 @@ const EDGE_NAMES = {
   default: { u0: 'Links', u1: 'Rechts', v0: 'Onderkant', v1: 'Bovenkant' },
 };
 
+/**
+ * Volgorde van afplakken voor het etiket: eerst de minst zichtbare kant, de meest zichtbare laatst, zodat de kop van de
+ * andere banden eronder valt. (De aanslag op de P110 hoeft niet op het etiket.)
+ */
+const EDGE_LETTER = { Voorkant: 'V', Achterkant: 'A', Onderkant: 'O', Bovenkant: 'B', Links: 'L', Rechts: 'R' };
+function edgeOrder(p, metProgramma) {
+  // Liggende stukken (dikte in de hoogte: ronde bodem, plintrib, werkblad, ...) krijgen de namen van een bodem.
+  const liggend = p.box && Math.abs(p.box.h - p.dikte) < 0.5 && !EDGE_NAMES[p.rol];
+  const names = liggend ? EDGE_NAMES.liggend : EDGE_NAMES[p.rol] ?? EDGE_NAMES.default;
+  const front = p.rol === 'front' || p.mat === 'front';
+  // Zichtbaarheid (laag = eerst plakken). Fronten: onder, boven, dan de lange zijkanten.
+  const score = n => front ? ({ Onderkant: 0, Bovenkant: 1, Links: 2, Rechts: 3 }[n] ?? 2)
+    : ({ Achterkant: 0, Onderkant: 1, Links: 2, Rechts: 2.5, Bovenkant: 3, Voorkant: 4 }[n] ?? 2);
+  const banded = ['u0', 'u1', 'v0', 'v1'].filter(e => p.edges?.[e] > 0).map(e => names[e]).sort((a, b) => score(a) - score(b));
+  const L = n => EDGE_LETTER[n] ?? n[0];
+  const kort = banded.length ? `PLAK ${banded.map(L).join('-')}` : '';
+  void metProgramma;
+  return { aanslag: [], plak: banded, kort };
+}
+
 function openPart(k, partId, onChange) {
   const body = el('<div class="content"></div>');
   const sheet = openSheet({ title: 'Onderdeel', left: { label: 'Klaar', bold: true }, body, wide: true });
@@ -1252,7 +1285,7 @@ function openPart(k, partId, onChange) {
     const names = EDGE_NAMES[p.rol] ?? EDGE_NAMES.default;
     const groups = {};
     for (const op of p.ops) {
-      const key = `${op.naam}|${op.kind === 'groef' ? `${op.breedte} × ${op.diepte}` : op.kind === 'uitsparing' ? `${op.w} × ${op.h}` : op.dia ? `Ø${op.dia} × ${op.diepte}` : ''}|${op.edge ? names[op.edge] : op.face ?? ''}`;
+      const key = `${op.naam}|${op.kind === 'contour' ? (Number(op.diepte) > 0 && op.diepte < p.dikte ? `gefreesd, ${op.diepte} diep` : 'gefreesd door de plaat') : op.kind === 'groef' ? `${op.breedte} × ${op.diepte}` : op.kind === 'uitsparing' ? `${op.w} × ${op.h}` : op.dia ? `Ø${op.dia} × ${op.diepte}` : ''}|${op.edge ? names[op.edge] : op.face ?? ''}`;
       groups[key] = (groups[key] ?? 0) + 1;
     }
     body.innerHTML = `
@@ -1433,8 +1466,10 @@ function panelSVG(p, names) {
   const Y = v => H - v;   // v naar boven
   const s = Math.max(W, H) / 400;  // lijndikte in verhouding
   const panelColor = decorOf(p.decor)?.kleur;
-  let g = p.shape
-    ? `<rect x="0" y="0" width="${W}" height="${H}" fill="none" stroke="#999" stroke-dasharray="${s * 6} ${s * 4}" stroke-width="${s}"/><polygon points="${p.shape.map(([u, v]) => `${u},${Y(v)}`).join(' ')}" class="pnl" stroke-width="${s * 1.5}"${panelColor ? ` style="fill:${panelColor}"` : ''}/>`
+  // Vorm in het bovenaanzicht (ronde kant, werkblad): als polygoon in (u, v).
+  const shape = p.shape ?? (p.shape3d?.plane === 'xz' && Math.abs(p.uLen - p.box.w) < 0.5 && Math.abs(p.vLen - p.box.d) < 0.5 ? p.shape3d.pts : null);
+  let g = shape
+    ? `<rect x="0" y="0" width="${W}" height="${H}" fill="none" stroke="#999" stroke-dasharray="${s * 6} ${s * 4}" stroke-width="${s}"/><polygon points="${shape.map(([u, v]) => `${u},${Y(v)}`).join(' ')}" class="pnl" stroke-width="${s * 1.5}"${panelColor ? ` style="fill:${panelColor}"` : ''}/>`
     : `<rect x="0" y="0" width="${W}" height="${H}" class="pnl" stroke-width="${s * 1.5}"${panelColor ? ` style="fill:${panelColor}"` : ''}/>`;
   // Kantenbanden
   // Band als smal vak net buiten de rand, in de kleur van zijn decor.
@@ -1455,7 +1490,13 @@ function panelSVG(p, names) {
     } else if (op.kind === 'uitsparing') {
       g += `<rect x="${op.u}" y="${Y(op.v + op.h)}" width="${op.w}" height="${op.h}" class="notch"/>`;
     } else if (op.kind === 'clamex' && op.edge == null) {
-      g += `<rect x="${op.u - 25}" y="${Y(op.v) - 4}" width="50" height="8" rx="3" class="clamex"/>`;
+      // Gedraaid volgens de richting van de verbinding (zoals in het MPR-programma).
+      const [du, dv] = op.dir ?? [1, 0], ang = -Math.atan2(dv, du) * 180 / Math.PI;
+      g += `<rect x="${op.u - 25}" y="${Y(op.v) - 4}" width="50" height="8" rx="3" class="clamex" transform="rotate(${ang.toFixed(1)} ${op.u} ${Y(op.v)})"/>`;
+    } else if (op.kind === 'contour') {
+      // Contour frezen (rood, doorgaand) of sponning (oranje gestreept, niet doorgaand).
+      const blind = Number(op.diepte) > 0 && op.diepte < p.dikte;
+      g += `<polyline points="${op.pts.map(([u, v]) => `${u},${Y(v)}`).join(' ')}" fill="none" stroke="${blind ? '#e08a1e' : '#d03030'}" stroke-width="${s * (blind ? 3 : 2)}"${blind ? ` stroke-dasharray="${s * 8} ${s * 5}"` : ''} stroke-linejoin="round"/>`;
     } else if (op.edge) {
       // Bewerking in de kant: driehoekje op de rand.
       const m = 9 * s;
@@ -1486,33 +1527,39 @@ function cutRows(project) {
   const rows = [];
   const hardware = {};
   const bestel = {};
-  for (const { k, res, parts } of projectParts(project, S())) {
+  // MPR-programma's per onderdeel (zelfde namen als in de MPR-zip): voor de barcode op het etiket.
+  const M = { ...S().mpr, tools: S().tools };
+  const items = projectParts(project, S());
+  const progs = projectPrograms(project, S(), M, items);
+  for (const { k, res, parts } of items) {
     if (res.error) continue;
     for (const p of sawParts(parts, S()).filter(q => !q.nietZagen)) {
       const c = cutInfo(p);
-      rows.push({ kast: p.kastLabel ?? k.code, naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...c });
+      const pr = progs.get(p);
+      rows.push({ kast: p.kastLabel ?? k.code, naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...c, prog: pr?.files ?? [], progKey: pr?.key ?? '', kant: edgeOrder(p, !!pr) });
     }
     for (const h of res.hardware) hardware[h.naam] = (hardware[h.naam] ?? 0) + h.aantal;
     for (const b of res.bestel ?? []) bestel[b.naam] = (bestel[b.naam] ?? 0) + b.aantal;
   }
   // Werkbladen: zelf gemaakt (plaat) in de zaaglijst; composiet/hout op de bestellijst (bij het beslag).
-  for (const g of werkbladGeometry(project, S())) {
+  werkbladGeometry(project, S()).forEach((g, gi) => {
     for (const h of g.hardware ?? []) hardware[h.naam] = (hardware[h.naam] ?? 0) + h.aantal;
     for (const p of g.parts.filter(q => q.rol === 'werkblad' || q.rol === 'spatwand')) {
-      if (p.materiaal === 'plaat') rows.push({ kast: 'Werkblad', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p) });
+      const wf = p.rol === 'werkblad' && p.materiaal === 'plaat' && p.ops.length ? mprForPart(p, M, `WB${String(gi + 1).padStart(2, '0')}`).files : [];
+      if (p.materiaal === 'plaat') rows.push({ kast: 'Werkblad', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p), prog: wf.map(f => f.name), progKey: wf.map(f => f.text).join('|'), kant: edgeOrder(p, wf.length > 0) });
       else bestel[`${p.rol === 'spatwand' ? 'Spatwand' : 'Werkblad'} ${p.plaattype.toLowerCase()} ${Math.round(p.uLen)} × ${Math.round(p.vLen)} × ${p.dikte} (${p.decor || ''})${p.rol === 'werkblad' && g.cut.length ? `, ${g.cut.length} uitsparing(en)` : ''}${p.rol === 'werkblad' && g.hoeken?.length ? `, hoekverbinding met ${g.hoeken.map(h => `${h.partner.naam || 'werkblad'} (${h.door ? 'loopt door' : 'stoot'})`).join(', ')}` : ''}`] = 1;
     }
-  }
+  });
   // Afwerkpanelen van het project.
   for (const pn of project.panelen ?? []) {
     const p = panelPartFull(pn, S());
-    rows.push({ kast: 'Afwerking', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p) });
+    rows.push({ kast: 'Afwerking', naam: p.naam, mat: matLabel(p), dikte: p.dikte, ...cutInfo(p), prog: [], progKey: '', kant: edgeOrder(p, false) });
   }
   // Gelijke onderdelen binnen dezelfde kast samenvoegen.
   const merged = [];
   for (const r of rows) {
     const same = merged.find(m => m.kast === r.kast && m.naam.replace(/ (links|rechts|\d+)$/, '') === r.naam.replace(/ (links|rechts|\d+)$/, '')
-      && m.mat === r.mat && m.L === r.L && m.B === r.B && ['L1', 'L2', 'B1', 'B2'].every(e => m[e] === r[e] && (!r[e] || m[e + 'd'] === r[e + 'd'])));
+      && m.mat === r.mat && m.L === r.L && m.B === r.B && m.progKey === r.progKey && m.kant?.kort === r.kant?.kort && ['L1', 'L2', 'B1', 'B2'].every(e => m[e] === r[e] && (!r[e] || m[e + 'd'] === r[e + 'd'])));
     if (same) { same.aantal++; if (same.naam !== r.naam) same.naam = same.naam.replace(/ (links|rechts|\d+)$/, ''); }
     else merged.push({ ...r, aantal: 1 });
   }
@@ -1551,7 +1598,8 @@ function openCutList(project) {
     title: `Zaaglijst ${project.naam}`, full: true, left: { label: 'Klaar', bold: true },
     right: { icon: 'share', label: 'Exporteren', onClick: async () => {
       const c = await actionSheet('Zaaglijst exporteren', '', [
-        { label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'STK voor de zaag (Schelling HPO)', value: 'stk' }, { label: 'CSV', value: 'csv' }]);
+        { label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'STK voor de zaag (Schelling HPO)', value: 'stk' }, { label: 'Scancodes (PDF, reserve voor de etiketten)', value: 'scan' }, { label: 'CSV', value: 'csv' }]);
+      if (c === 'scan') { const d = scanCodesFor(project, rows); shareFile(d.blob, d.name); }
       if (c === 'xlsx') shareFile(cutListXlsx(project, rows, hardware, bands, bestel), `Zaaglijst ${safeName(project.naam)}.xlsx`);
       if (c === 'csv') shareFile(cutListCsv(project, rows), `Zaaglijst ${safeName(project.naam)}.csv`);
       if (c === 'stk') { const stk = cutListStk(project, rows); shareFile(stk.blob, stk.name); }
@@ -1602,86 +1650,83 @@ const stkBoardType = r => {
   const N = { ...HPO_DEFAULTS, ...(S().nest ?? {}) };
   const type = r.plaattype ?? 'Melamine';
   const tpl = type === 'HPL' ? N.hpoHpl : type === 'Trespa' ? N.hpoTrespa : type === 'Buigtriplex' ? N.hpoBuig : type === 'Multiplex' ? N.hpoMultiplex : N.hpoMelamine;
-  return String(tpl || '{decor}').replace(/\{decor\}/gi, r.decor ?? '').replace(/\{dikte\}/gi, String(Math.round(Number(r.dikte) * 10) / 10));
+  return String(tpl || '{decor}').replace(/\{hpo\}/gi, hpoDecor(r.decor)).replace(/\{decor\}/gi, r.decor ?? '').replace(/\{dikte\}/gi, String(Math.round(Number(r.dikte) * 10) / 10));
 };
+/** HPO-naam van een decor (categorie in de plaat- en kantendatabank van HPO, bv. EFFEN_1 of HOUT_2); anders de code. */
+const hpoDecor = code => decorOf(code)?.hpo || code || '';
 
 /** Naam van de stuklijst: tevens de bestandsnaam, hoogstens 20 tekens, zonder verboden tekens. */
 const stkName = project => (project.naam || 'Stuklijst').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 20) || 'Stuklijst';
 
-const STK_GUID = '{00000000-0000-0000-0000-000000000000}';
-
-/** Tekst als UTF-16 LE met BOM, zoals HPO zelf zijn .stk-bestanden schrijft. */
-function utf16le(text) {
-  const bytes = new Uint8Array(2 + text.length * 2);
-  bytes[0] = 0xff; bytes[1] = 0xfe;
-  for (let i = 0; i < text.length; i++) { const c = text.charCodeAt(i); bytes[2 + i * 2] = c & 255; bytes[3 + i * 2] = c >> 8; }
-  return bytes;
+// Opbouw overgenomen van een stuklijst die HPO wel correct inlas (voorbeelden/stk/Bart_Slaapkamer kids.stk, gemaakt door
+// de ontwerpsoftware): gewone tekst (ANSI), regeleinde LF, L 01 als kop, per onderdeel F 01 (vaste kolommen, 320 tekens),
+// F 06, F 10 (plaattype), F 11–F 13 (mappen), F 14, F 15, F 60, F 61, F 80 (kantenbanden), en L$ op het einde.
+// De HPO-exports in UTF-16 (L 06, F 09, GUID's) leest HPO zelf niet terug in.
+/** Pad vóór de programmanaam in de barcode (zoals de map in de MPR-zip), bv. "Projectnaam\\". */
+function programPrefix(project) {
+  const N = { ...HPO_DEFAULTS, ...(S().nest ?? {}) };
+  // Geen spaties: die leest de scanner niet.
+  return String(N.stkPad ?? '').replace(/\{project\}/gi, programFolder(project)).replace(/\s+/g, '_');
 }
 
-// Opbouw overgenomen van stuklijsten die HPO zelf exporteerde (voorbeelden/stk): L01, L06, per onderdeel F01 + F06 + F09 + F80, L$.
+/** Blad met alle scancodes (zelfde tekst als de barcode op de etiketten), voor als een etiket ontbreekt. */
+function scanCodesFor(project, rows) {
+  const prefix = programPrefix(project);
+  const entries = rows.filter(r => r.prog?.length).map(r => ({ kast: r.kast, naam: r.naam, L: r.L, B: r.B, mat: r.mat, aantal: r.aantal, codes: r.prog.map(n => prefix + n), kant: r.kant }));
+  return scanCodesPdf(project.naam || 'Project', entries);
+}
+
 function cutListStk(project, rows) {
   const today = new Date();
   const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const name = stkName(project);
+  const pad = (v, n) => stkText(v, n);
+  const mmTxt = v => String(Math.round(Number(v) * 10) / 10);
+  const N = { ...HPO_DEFAULTS, ...(S().nest ?? {}) };
+  const prefix = programPrefix(project);
   const lines = [];
-  // L01: kopregel van de stuklijst.
-  lines.push(stkLine(['L', '01', stkText(name, 20), stkText('', 20), date, date, '0', '0', '2', stkText('', 20), '0']));
-  // L06: databanken gebruiken (platen, kanten, ...).
-  lines.push(stkLine(['L', '06', stkText('', 20), '1', '1', '1', '1', '1', '1', '0', '0', '0', stkText('', 20)]));
+  // L 01: naam (36), klant (4), leverdatum, fabricagedatum, 0 0 0.
+  lines.push(`L 01 ${pad(name, 36)} ${pad(name.toUpperCase().replace(/[^A-Z0-9]/g, ''), 4)} ${date} ${date} 0 0 0`);
   rows.forEach((r, i) => {
     const nr = i + 1;
     const wood = isWoodDecor(r.decor, S().decors);
-    const bands = ['L1', 'L2', 'B1', 'B2'].filter(e => r[e]).map(e => `${e}:${r[e]} ${r[e + 'd'] ?? ''}`.trim()).join(' ');
-    // F01: één regel per onderdeel. A = lengte langs de nerf, B = breedte; zaagmaat = eindmaat.
-    lines.push(stkLine([
-      'F', '01',
-      stkNum(nr, 4),                 // volgnummer
-      stkNum(0, 4),                  // gecombineerd nummer
-      '0',                           // categorie: normaal stuk
-      stkNum(r.aantal, 6),           // aantal besteld
-      stkNum(r.aantal, 6),           // aantal geoptimaliseerd
-      stkText(stkBoardType(r), 20),  // plaattype (moet bestaan in de platendatabank van HPO)
-      stkMm(r.dikte),                // plaatdikte
-      stkMm(r.L), stkMm(r.B),        // zaagmaat A en B
-      stkMm(r.L), stkMm(r.B),        // eindmaat A en B
-      stkText(`${r.kast}_${r.naam}`, 20), // omschrijving
-      wood ? '0' : '2',              // draaien: houtdecor niet (nerf langs A), unikleur wel
-      '9', '9',                      // prioriteit, kwaliteit
-      '0',                           // alleen gedraaid gebruiken: nee
-      stkNum(0, 2),                  // groep
-      stkNum(0, 6), stkNum(0, 3),    // overlevering stuks / %
-      stkNum(0, 6), stkNum(0, 3),    // onderlevering stuks / %
-      '1', '0',                      // optimaliseren: ja; klein onderdeel: nee
-      stkText('', 20),               // positienummer extern (NC-programma)
-      stkText('', 20),               // regelnummer extern (2e NC-programma)
-      stkText(bands ? `Band ${bands}` : '', 40), // bewerkingsnotitie: kantenband
-      '1', '0',                      // etiket afdrukken: ja; paklijst: nee
-      stkText(r.kast, 20),           // bronbouwgroep (kast)
-      stkText(name, 20),             // bronstuklijst
-      stkNum(nr, 9),                 // nummer in de stuklijst
-      date,                          // leverdatum
-      '0', '0',                      // oriëntatie in de strook; status
-      stkNum(0, 3), stkNum(0, 2), stkNum(0, 2), // intern, maatvermenigvuldiger A en B
-      ' ' + stkNum(0, 6),            // aantalcorrectie (met tekenpositie)
-      '1', stkNum(0, 8),             // toegestaan in 3e fase; max. afval 3e fase
-      stkNum(0, 4), stkNum(0, 8),    // frontpatroon, primaire sleutel
-      '0', STK_GUID, STK_GUID, STK_GUID, '0',
-    ]));
+    const board = stkBoardType(r);
+    // F 01: A = lengte langs de nerf, B = breedte; zaagmaat = eindmaat; draaien 2 (unikleur) of 0 (houtdecor).
+    // Programma 1 en 2 (zijde A en B) zoals in de MPR-zip: in F 01 (20 tekens) en met het pad in F 60 / F 61 (barcode op het etiket).
+    const [p1 = '', p2 = ''] = r.prog ?? [];
+    lines.push(`F 01 ${stkNum(nr, 4)} 0000 0 ${stkNum(r.aantal, 6)} 000000 ${pad(board, 20)} ${stkMm(r.dikte)} ${stkMm(r.L)} ${stkMm(r.B)} ${stkMm(r.L)} ${stkMm(r.B)} `
+      + `${pad(`${r.kast}_${r.naam}`, 20)} ${wood ? '0' : '2'} 9 9 0 00 000000 000 000000 000 1 0 ${pad(p1, 20)} ${pad(p2, 20)} ${pad(r.kant?.kort ?? '', 40)} `
+      + `1 0 ${pad(r.kast, 20)} ${pad(name, 20)} ${stkNum(nr, 9)} ${pad(date, 17)} 0 0 000 `);
     lines.push(`F 06 1${' '.repeat(22)}01 001 01${' '.repeat(85)}0`);
-    lines.push('F 09 00000000 00000000 00000000 00000000 XXXX');
-    lines.push(`F 80 00000000 00000000 00000000 00000000 0000 ${' '.repeat(83)} 00 00 00 00 00000000 00000000 ${' '.repeat(41)}`);
+    lines.push(`F 10 ${pad(board, 70)}`);
+    lines.push(`F 11 ${pad('', 70)}`);
+    lines.push(`F 12 ${pad('', 70)}`);
+    lines.push(`F 13 ${pad('', 70)}`);
+    lines.push(`F 14 ${pad('[PLATE SPF SEQUENCE NR]', 70)}`);
+    lines.push(`F 15 ${pad(`X-NC: ${mmTxt(r.L)}`, 70)}`);
+    lines.push(`F 60 ${p1 ? stkText(prefix + p1, 120).trimEnd() : ''}`);
+    lines.push(`F 61 ${p2 ? stkText(prefix + p2, 120).trimEnd() : ''}`);
+    // F 80: kantenbanden (zoals in de kantendatabank van HPO; op het etiket aan de kant waar de band komt):
+    // langs A (lengte) kant 1 en 2, langs B (breedte) kant 1 en 2. Breedte van de band = plaatdikte + 5 (18 → 23).
+    const bandName = e => (r[e] ? String(N.hpoBand || '{hpo}_{breedte}x{dikte}').replace(/\{hpo\}/gi, hpoDecor(r[e + 'd'] ?? r.decor)).replace(/\{decor\}/gi, r[e + 'd'] ?? r.decor ?? '')
+      .replace(/\{breedte\}/gi, String(Math.round(Number(r.dikte)) + 5)).replace(/\{dikte\}/gi, String(r[e])) : '');
+    lines.push(`F 80 00000000 00000000 00000000 00000000 0000 ${['L1', 'L2', 'B1', 'B2'].map(e => pad(bandName(e), 20) + ' ').join('')}00 00 00 00 00000000 00000000${' '.repeat(42)}0`);
   });
   lines.push('L$');
-  return { blob: new Blob([utf16le(lines.join('\r\n') + '\r\n')], { type: 'application/octet-stream' }), name: `${name}.stk` };
+  const text = lines.join('\n') + '\n';
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 255;
+  return { blob: new Blob([bytes], { type: 'application/octet-stream' }), name: `${name}.stk` };
 }
 
 function cutListXlsx(project, rows, hardware, bands, bestel = []) {
   const b = (r, e) => r[e] ? `${r[e]} mm ${r[e + 'd']}` : '';
   return makeXlsx([
-    { name: 'Zaaglijst', columns: [8, 30, 26, 11, 8, 8, 10, 10, 16, 16, 16, 16],
-      rows: [['Kast', 'Onderdeel', 'Decor', 'Plaat', 'Dikte', 'Aantal', 'Lengte', 'Breedte', 'Band L1', 'Band L2', 'Band B1', 'Band B2'],
-        ...rows.map(r => [r.kast, r.naam, decorName(r.decor), r.plaattype ?? 'Melamine', r.dikte, r.aantal, r.L, r.B, b(r, 'L1'), b(r, 'L2'), b(r, 'B1'), b(r, 'B2')])] },
+    { name: 'Zaaglijst', columns: [8, 30, 26, 11, 8, 8, 10, 10, 16, 16, 16, 16, 40, 22],
+      rows: [['Kast', 'Onderdeel', 'Decor', 'Plaat', 'Dikte', 'Aantal', 'Lengte', 'Breedte', 'Band L1', 'Band L2', 'Band B1', 'Band B2', 'Afplakken (volgorde)', 'Programma'],
+        ...rows.map(r => [r.kast, r.naam, decorName(r.decor), r.plaattype ?? 'Melamine', r.dikte, r.aantal, r.L, r.B, b(r, 'L1'), b(r, 'L2'), b(r, 'B1'), b(r, 'B2'),
+          (r.kant?.plak ?? []).map((n, i) => `${i + 1} ${n}`).join(', '), (r.prog ?? []).join(' + ')])] },
     { name: 'Kantenband', columns: [36, 10], rows: [['Kantenband', 'Meter'], ...bands.map(x => [x.naam, x.meter])] },
     { name: 'Beslag', columns: [40, 10], rows: [['Beslag', 'Aantal'], ...hardware.map(h => [h.naam, h.aantal])] },
     { name: 'Bestellen', columns: [90, 10], rows: [['Te bestellen', 'Aantal'], ...bestel.map(h => [h.naam, h.aantal])] },
@@ -1930,10 +1975,12 @@ const SettingsView = {
       const r = el(`<div class="row decor-row">
         <input type="color" class="swatch" value="${esc(d.kleur)}" aria-label="Kleur ${esc(d.code)}">
         <input class="input-plain left code" value="${esc(d.code)}" aria-label="Code">
-        <input class="input-plain left" value="${esc(d.naam)}" placeholder="Naam" aria-label="Naam">
+        <input class="input-plain left naam" value="${esc(d.naam)}" placeholder="Naam" aria-label="Naam">
+        <input class="input-plain left hpo" value="${esc(d.hpo ?? '')}" placeholder="HPO-naam" aria-label="HPO-naam (bv. EFFEN_1)" title="Naam in HPO, bv. EFFEN_1 of HOUT_2 (voor plaat en kantenband)">
         <label class="hout-check" title="Houtstructuur (nerf)"><input type="checkbox" ${isWoodDecor(d.code, s.decors) ? 'checked' : ''}>Hout</label>
         <button class="mini danger" type="button" aria-label="Verwijder">${icon('trash')}</button></div>`);
-      const [kleur, code, naam, hout] = $$('input', r);
+      const [kleur, code, naam, hpo, hout] = $$('input', r);
+      hpo.addEventListener('change', () => { d.hpo = hpo.value.trim() || undefined; Store.save(); });
       hout.addEventListener('change', () => { d.hout = hout.checked; Store.save(); });
       kleur.addEventListener('input', () => { d.kleur = kleur.value; Store.save(); });
       code.addEventListener('change', () => { if (code.value.trim()) { d.code = code.value.trim(); Store.save(); } });
@@ -1968,7 +2015,7 @@ const SettingsView = {
             ${row('Standaard fronten', decorSelectHTML('st-decorFront', s.decorFront))}
             ${row('Plaattype fronten', selectHTML('st-frontMateriaal', PLAATTYPES.map(x => [x, x]), s.frontMateriaal))}
           </div>
-          <div class="group-footer">Tik op het kleurvak om de kleur in 3D te kiezen (een benadering). "Hout" = decor met nerf: in het zaagplan blijft de nerf in de lengte van de plaat.</div></div>
+          <div class="group-footer">Tik op het kleurvak om de kleur in 3D te kiezen (een benadering). HPO-naam = de naam van dit decor in de plaat- en kantendatabank van HPO (bv. EFFEN_1 of HOUT_2), voor de plaat en de kantenband op de etiketten. "Hout" = decor met nerf: in het zaagplan blijft de nerf in de lengte van de plaat.</div></div>
         <div class="group"><div class="group-header">Zaagplan</div><div class="group-body">
           ${row('Melamine: plaatlengte', numHTML('nz-plaatLengte', s.nest.plaatLengte))}
           ${row('Melamine: plaatbreedte', numHTML('nz-plaatBreedte', s.nest.plaatBreedte))}
@@ -1982,12 +2029,14 @@ const SettingsView = {
           <div class="row"><span class="row-label">HPO-plaattype HPL</span><div class="row-fill"><input class="input-plain" id="nz-hpoHpl" value="${esc(s.nest.hpoHpl ?? HPO_DEFAULTS.hpoHpl)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype Trespa</span><div class="row-fill"><input class="input-plain" id="nz-hpoTrespa" value="${esc(s.nest.hpoTrespa ?? HPO_DEFAULTS.hpoTrespa)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype buigtriplex</span><div class="row-fill"><input class="input-plain" id="nz-hpoBuig" value="${esc(s.nest.hpoBuig ?? HPO_DEFAULTS.hpoBuig)}"></div></div>
+          <div class="row"><span class="row-label">HPO-naam kantenband</span><div class="row-fill"><input class="input-plain" id="nz-hpoBand" value="${esc(s.nest.hpoBand ?? HPO_DEFAULTS.hpoBand)}"></div></div>
+          <div class="row"><span class="row-label">Pad voor de programma's (barcode)</span><div class="row-fill"><input class="input-plain" id="nz-stkPad" value="${esc(s.nest.stkPad ?? HPO_DEFAULTS.stkPad)}"></div></div>
           <div class="row"><span class="row-label">HPO-plaattype multiplex</span><div class="row-fill"><input class="input-plain" id="nz-hpoMultiplex" value="${esc(s.nest.hpoMultiplex ?? HPO_DEFAULTS.hpoMultiplex)}"></div></div>
           ${row('Zaagplan', selectHTML('nz-methode', [['stroken', 'Logisch zagen (stroken)'], ['afval', 'Zo weinig mogelijk afval']], s.nest.methode ?? 'stroken'))}
           ${row('Strook opvullen met smaller stuk tot', numHTML('nz-stripVul', s.nest.stripVul ?? 50))}
           ${row('CSV: scheidingsteken', selectHTML('nz-csvScheiding', [[';', 'Puntkomma ;'], [',', 'Komma ,'], ['\t', 'Tab']], s.nest.csvScheiding ?? ';'))}
           ${row('CSV: decimaalteken', selectHTML('nz-csvDecimaal', [['.', 'Punt (12.5)'], [',', 'Komma (12,5)']], s.nest.csvDecimaal ?? '.'))}
-        </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde. HPO-plaattype: de naam van de plaat in de platendatabank van de zaag, {decor} en {dikte} worden ingevuld (MEL_{decor}_{dikte} → MEL_W980_18). Die naam moet exact bestaan in HPO.</div></div>
+        </div><div class="group-footer">De nerf loopt in de lengte van de plaat. De CSV-zaaglijst (Zaaglijst › Exporteren) heeft de kolommen: ${CSV_COLUMNS.join(', ')}. In HPO op de zaag stel je één keer een importsjabloon in met die volgorde. HPO-plaattype: de naam van de plaat in de platendatabank van de zaag; {hpo} = de HPO-naam van het decor (in te vullen bij de decors, bv. W980 → EFFEN_1), {decor} = de decorcode, {dikte} = de dikte (MEL_{hpo}_{dikte} → MEL_EFFEN_1_18). Die naam moet exact bestaan in HPO. Kantenband: naam in de kantendatabank ({hpo}, {breedte} = plaatdikte + 5, {dikte} = banddikte → EFFEN_1_23x1); HPO drukt ze op het etiket aan de kant van de band. Pad voor de programma's: komt vóór de MPR-naam in de barcode ({project} = de map in de MPR-zip).</div></div>
         <div class="group"><div class="group-header">Machine (woodWOP)</div><div class="group-body">
           <div class="row"><span class="row-label">Contourfrees linksdraaiend</span><div class="row-fill"><input class="input-num" id="mp-freesContourLinks" value="${esc(s.mpr.freesContourLinks ?? '150')}"></div></div>
           ${row('Freesrichting contouren', selectHTML('mp-freesRichting', [['gelijkloop', 'Gelijkloop aan het stuk (minder uitbrokkelen)'], ['tegenloop', 'Tegenloop aan het stuk']], s.mpr.freesRichting ?? 'gelijkloop'))}
@@ -2086,7 +2135,7 @@ const SettingsView = {
     const CATS = [
       { id: 'platen', naam: 'Platen en kantenband', icon: 'table', groepen: ['Platen', 'Kantenband', 'Rugwandgroef'] },
       { id: 'decors', naam: 'Decors', icon: 'eye', groepen: ['Decors'] },
-      { id: 'constructie', naam: 'Constructie', icon: 'cube', groepen: ['Deuvels en schroeven', 'Clamex', 'Systeemboringen', 'Markeringen', 'Hangkasten', 'Opties', 'Overige'] },
+      { id: 'constructie', naam: 'Constructie', icon: 'cube', groepen: ['Deuvels en schroeven', 'Clamex', 'Systeemboringen', 'Markeringen', 'Hangkasten', 'Opties', 'Overige', 'Ronde kant', 'Werkbladen in een hoek'] },
       { id: 'fronten', naam: 'Fronten, scharnieren en grepen', icon: 'list', groepen: ['Fronten', 'Scharnieren'] },
       { id: 'lades', naam: 'Lades (Blum)', icon: 'explode', groepen: ['Ladegeleiders', 'Blum'] },
       { id: 'led', naam: 'Led-verlichting', icon: 'plus', groepen: ['Led-verlichting'] },
