@@ -31,6 +31,35 @@ Per project: *MPR-bestanden (woodWOP)* maakt een zipbestand met per kast een map
 - Ligging zoals de P110-programma's: binnenkant boven, voorkant op Y = 0; deuren met de scharnierkant op Y = 0.
 - In `voorbeelden/test Kasten tool - hangkast zoals K02` staan testprogramma's. **Controleer alles eerst in de simulatie van woodWOP.**
 
+## Schets inlezen (foto)
+
+In een project: *Schets inlezen (foto)*. Teken per wand een vooraanzicht (perspectief mag) op gewoon papier, niet op schaal,
+met de maten erbij en per kast een code of gewone woorden. Het voorbeeldblad met alle codes staat in het venster en in
+`voorbeelden/Schets voorbeeld.pdf`. Claude leest de foto; je krijgt eerst een lijst om na te kijken, daarna worden het gewone
+kasten die je aanpast zoals altijd (niet goed: ↶ zet alles terug).
+
+### API-sleutel aanmaken
+
+Het lezen gebeurt met de Claude API van Anthropic. Daarvoor heb je een eigen API-sleutel nodig (los van een Claude-abonnement).
+
+1. **Account maken**: ga naar [console.anthropic.com](https://console.anthropic.com) en maak een account aan met je e-mailadres.
+2. **Tegoed opladen**: ga naar *Billing* (of *Plans & Billing*), voeg een betaalkaart toe en laad een klein bedrag op
+   (bv. 5 euro). Zonder tegoed werkt de sleutel niet. Een foto lezen kost enkele eurocent.
+3. **Sleutel aanmaken**: ga naar *API Keys*, druk op *Create Key* en geef ze een naam (bv. "Kasten tool").
+   Je krijgt een lange code die begint met `sk-ant-…`. **Kopieer ze meteen**: je kunt ze achteraf niet meer bekijken
+   (kwijt = gewoon een nieuwe maken).
+4. **In de app plakken**: open een project › *Schets inlezen (foto)* › plak de code bij *API-sleutel*. De app onthoudt ze
+   alleen op dat toestel; op een ander toestel plak je ze opnieuw.
+
+Let op:
+
+- De sleutel is zoals een wachtwoord van je betaalaccount: geef ze aan niemand en zet ze niet in een bericht of op een foto.
+  Vertrouw je het niet meer, verwijder ze dan bij *API Keys* en maak een nieuwe.
+- Bij *Billing* kun je een maximumbedrag per maand instellen.
+- "De API-sleutel klopt niet": de code is niet volledig gekopieerd. "Geen tegoed": er moet nog geld op je account.
+- De foto gaat naar Anthropic om gelezen te worden; je hebt dus internet nodig. Sonnet is snel en goedkoop, Opus leest
+  moeilijk handschrift beter (keuze in het venster).
+
 ## Nog te doen
 
 - Testen van de MPR-bestanden in woodWOP en bijsturen (ligging, boormodus, gereedschap).

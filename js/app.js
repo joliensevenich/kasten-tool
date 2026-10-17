@@ -253,16 +253,20 @@ const Projects = {
       });
     }
 
+    const panelOf = key => (p.panelen ?? []).find(x => `pn-${x.id}` === key);
     if (p.kasten.length) {
       this.viewer = makeViewer($('#pj-viewer', v), { onPick: hit => {
         if (this.panelPick) { pickPanelPoint(hit); return; }
         if (this.moveMode) {
           // Kast gekozen en tik op een andere kast: ertegen zetten (zijkant) of erop (bovenkant).
+          // Paneel gekozen en tik op een kast: het paneel komt tegen die kant van de kast.
+          if (this.moveKey?.startsWith('pn-') && hit?.cab && p.kasten.some(x => x.id === hit.cab) && hit.normal) { attachPanel(hit); return; }
           if (this.moveKey && hit?.cab && hit.cab !== this.moveKey && p.kasten.some(x => x.id === hit.cab) && hit.point && hit.normal) { attachTo(hit); return; }
-          this.moveKey = hit?.cab && p.kasten.some(x => x.id === hit.cab) ? hit.cab : null; this.viewer.highlightCab(this.moveKey); renderMove(); return;
+          const kies = hit?.cab && (p.kasten.some(x => x.id === hit.cab) || (hit.cab.startsWith('pn-') && panelOf(hit.cab)));
+          this.moveKey = kies ? hit.cab : null; this.viewer.highlightCab(this.moveKey); renderMove(); return;
         }
         if (hit?.cab?.startsWith?.('wb-')) { const wb = p.werkbladen?.find(x => `wb-${x.id}` === hit.cab); if (wb) openWorktop(p, wb, () => { this.keepCamera = true; this.renderProject(); }); return; }
-        if (hit?.cab === 'afwerk') { const pn = p.panelen?.find(x => x.id === hit.part.id); if (pn) openPanel(p, pn, () => { this.keepCamera = true; this.renderProject(); }); return; }
+        if (hit?.cab?.startsWith?.('pn-')) { const pn = panelOf(hit.cab); if (pn) openPanel(p, pn, () => { this.keepCamera = true; this.renderProject(); }); return; }
         if (hit) { const k = p.kasten.find(x => x.id === hit.cab); if (k) openCabinet(p, k, hit.part.id); }
       } });
       if (!this.viewer) return;
@@ -275,7 +279,8 @@ const Projects = {
       const room = roomGeometry(p);
       if (room.parts.length) cabs.push({ key: 'ruimte', parts: room.parts, offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
       for (const g of werkbladGeometry(p, S())) cabs.push({ key: `wb-${g.wb.id}`, parts: g.parts, offsetX: g.L.x, offsetY: g.L.y, offsetZ: g.L.z, rot: g.L.rot });
-      if (p.panelen?.length) cabs.push({ key: 'afwerk', parts: p.panelen.map(pn => panelPartFull(pn, S())), offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
+      // Elk afwerkpaneel apart, zodat je het in "Verplaatsen" kunt kiezen en slepen.
+      for (const pn of p.panelen ?? []) cabs.push({ key: `pn-${pn.id}`, parts: [panelPartFull(pn, S())], offsetX: 0, offsetY: 0, offsetZ: 0, rot: 0 });
       this.viewer.showFloor = true;
       this.viewer.floorY = 0;
       this.viewer.show(cabs, { refit: !this.keepCamera });
@@ -341,6 +346,7 @@ const Projects = {
       };
       const step = () => this.moveStep ?? 10;
       viewer.onDrag = (key, x, z) => {
+        if (key.startsWith('pn-')) return dragPanel(key, x, z);
         const k = p.kasten.find(c => c.id === key);
         const pos = { ...posOf(k), x, z };
         const me = worldBox(k, pos);
@@ -371,6 +377,11 @@ const Projects = {
         return { x: nx, z: nz };
       };
       viewer.onDragEnd = key => {
+        if (key.startsWith('pn-')) {
+          const pn = panelOf(key);
+          if (pn?._drag) { movePanel(pn, { x: pn._drag.x, z: pn._drag.z }); delete pn._drag; touch(p); this.keepCamera = true; this.renderProject(); }
+          return;
+        }
         const k = p.kasten.find(c => c.id === key);
         if (!k?._drag) return;
         setPos(k, { ...posOf(k), x: k._drag.x, z: k._drag.z });
@@ -379,13 +390,82 @@ const Projects = {
         if (applyObstacles(p)) { touch(p); this.keepCamera = true; this.renderProject(); return; }
         renderMove();
       };
+      // Afwerkpaneel slepen over de vloer: vastklikken tegen de kanten van kasten en andere panelen (binnen 30 mm).
+      const dragPanel = (key, x, z) => {
+        const pn = panelOf(key), b = panelBox(pn);
+        const me = { x0: b.x0 + x, x1: b.x1 + x, z0: b.z0 + z, z1: b.z1 + z };
+        let dx = null, dz = null;
+        const others = [...p.kasten.map(o => worldBox(o, posOf(o))).filter(Boolean), ...(p.panelen ?? []).filter(q => q !== pn).map(panelBox)];
+        for (const ob of others) {
+          for (const [a, c] of [[me.x0, ob.x1], [me.x1, ob.x0], [me.x0, ob.x0], [me.x1, ob.x1]]) if (Math.abs(c - a) < 30 && (dx === null || Math.abs(c - a) < Math.abs(dx))) dx = c - a;
+          for (const [a, c] of [[me.z0, ob.z1], [me.z1, ob.z0], [me.z0, ob.z0], [me.z1, ob.z1]]) if (Math.abs(c - a) < 30 && (dz === null || Math.abs(c - a) < Math.abs(dz))) dz = c - a;
+        }
+        const nx = dx !== null ? x + dx : Math.round(x / 10) * 10, nz = dz !== null ? z + dz : Math.round(z / 10) * 10;
+        pn._drag = { x: nx, z: nz };
+        const info = $('#mv-info', v);
+        if (info) info.textContent = `X ${Math.round(b.x0 + nx)} · Z ${Math.round(b.z0 + nz)}`;
+        return { x: nx, z: nz };
+      };
+      // Paneel tegen de aangetikte kant van een kast, op maat van die kast: zijkant = van de muur tot de voorkant van de
+      // fronten en van de vloer (hangkast: onderkant kast) tot de bovenkant; voor- of achterkant = kastbreedte; bovenop =
+      // de hele bovenkant. Daarna kun je de maten nog aanpassen.
+      const attachPanel = hit => {
+        const pn = panelOf(this.moveKey), o = p.kasten.find(c => c.id === hit.cab);
+        const wb = worldBox(o, posOf(o));
+        if (!pn || !wb) return;
+        const d = Number(pn.dikte) || S().front;
+        const n = hit.normal;
+        const yo = posOf(o).y, y0 = groepOf(o) === 'Bovenkasten' ? yo : 0;
+        const top = yo + Number(o.hoogte) + (Number(o.paslat?.boven) || 0);
+        let box;
+        if (n.y > 0.7) {
+          // Bovenop: liggend paneel over de kast (zelfde lengte en breedte als het paneel had), linksachter gelijk.
+          pn.as = 'y'; pn.zin = 1;
+          box = { x0: wb.x0, x1: wb.x1, y0: top, y1: top + d, z0: wb.z0, z1: wb.z1 };
+        } else if (Math.abs(n.x) >= Math.abs(n.z)) {
+          const zin = n.x > 0 ? 1 : -1, xv = zin > 0 ? wb.x1 : wb.x0;
+          pn.as = 'x'; pn.zin = zin;
+          box = { x0: zin > 0 ? xv : xv - d, x1: zin > 0 ? xv + d : xv, y0, y1: top, z0: wb.z0, z1: wb.z1 };
+        } else {
+          const zin = n.z > 0 ? 1 : -1, zv = zin > 0 ? wb.z1 : wb.z0;
+          pn.as = 'z'; pn.zin = zin;
+          box = { x0: wb.x0, x1: wb.x1, y0, y1: top, z0: zin > 0 ? zv : zv - d, z1: zin > 0 ? zv + d : zv };
+        }
+        setPanelBox(pn, box);
+        touch(p); this.keepCamera = true; this.renderProject();
+      };
+      const renderPanelMove = (panel, pn) => {
+        const b = panelBox(pn), st = step();
+        panel.innerHTML = `<div class="group-header head-with-btn"><span>Verplaatsen: ${esc(pn.naam || 'afwerkpaneel')}</span><button type="button" class="head-btn" id="mv-done">Klaar</button></div>
+          <div class="group-body">
+            <div class="row"><span class="row-label">Stap</span><div class="row-fill">${[1, 10, 100].map(n => `<button class="mini ${n === st ? 'on' : ''}" type="button" data-step="${n}">${n} mm</button>`).join('')}</div></div>
+            <div class="row"><span class="row-label">Links / rechts</span><div class="row-fill"><button class="mini" type="button" data-pm="x,-1">◀</button><button class="mini" type="button" data-pm="x,1">▶</button></div></div>
+            <div class="row"><span class="row-label">Naar achter / voor</span><div class="row-fill"><button class="mini" type="button" data-pm="z,-1">▲</button><button class="mini" type="button" data-pm="z,1">▼</button></div></div>
+            <div class="row"><span class="row-label">Omlaag / omhoog</span><div class="row-fill"><button class="mini" type="button" data-pm="y,-1">↓</button><button class="mini" type="button" data-pm="y,1">↑</button></div></div>
+            ${pn.as !== 'y' ? `<div class="row"><span class="row-label">Draaien</span><div class="row-fill"><button class="mini" type="button" id="pm-rot">⟳ 90°</button></div></div>` : ''}
+            ${row('X (linkerkant)', numHTML('pm-x', Math.round(b.x0 * 10) / 10))}
+            ${row('Y (onderkant)', numHTML('pm-y', Math.round(b.y0 * 10) / 10))}
+            ${row('Z (achterkant)', numHTML('pm-z', Math.round(b.z0 * 10) / 10))}
+            <div class="row"><span class="row-sub" id="mv-info">Sleep het paneel over de vloer, of tik op de zijkant (of bovenkant) van een kast om het ertegen te zetten.</span></div>
+            <button class="row button" type="button" id="pm-edit">Maten en materiaal</button>
+          </div>`;
+        const redo = () => { touch(p); this.keepCamera = true; this.renderProject(); };
+        $$('[data-step]', panel).forEach(x => x.addEventListener('click', () => { this.moveStep = Number(x.dataset.step); renderMove(); }));
+        $$('[data-pm]', panel).forEach(x => x.addEventListener('click', () => { const [ax, sg] = x.dataset.pm.split(','); movePanel(pn, { [ax]: Number(sg) * step() }); redo(); }));
+        $('#pm-rot', panel)?.addEventListener('click', () => { rotatePanel(pn); redo(); });
+        for (const ax of ['x', 'y', 'z']) $(`#pm-${ax}`, panel).addEventListener('change', e => { if (e.target.value === '') return; movePanel(pn, { [ax]: Number(e.target.value) - panelBox(pn)[`${ax}0`] }); redo(); });
+        $('#pm-edit', panel).addEventListener('click', () => openPanel(p, pn, () => { this.keepCamera = true; this.renderProject(); }));
+        $('#mv-done', panel).addEventListener('click', () => { this.moveKey = null; viewer.highlightCab(null); renderMove(); });
+      };
       const renderMove = () => {
         const panel = $('#pj-movepanel', v);
         if (!panel) return;
         panel.classList.toggle('hidden', !this.moveMode);
+        const pnSel = this.moveKey?.startsWith('pn-') ? panelOf(this.moveKey) : null;
+        if (pnSel) { renderPanelMove(panel, pnSel); return; }
         const k = p.kasten.find(c => c.id === this.moveKey);
         if (!k) {
-          panel.innerHTML = `<div class="group-header">Verplaatsen</div><div class="group-body"><div class="row"><span class="row-sub">Tik in 3D op een kast om ze te kiezen. Tik dan op de zijkant van een andere kast om ze ertegen te zetten (hangkast: boven gelijk, onder- en kolomkast: onder gelijk), of op de bovenkant om ze erop te stapelen. Slepen over de vloer of de knoppen gaan ook.</span></div></div>`;
+          panel.innerHTML = `<div class="group-header">Verplaatsen</div><div class="group-body"><div class="row"><span class="row-sub">Tik in 3D op een kast of een afwerkpaneel om het te kiezen. Tik dan op de zijkant van een andere kast om ze ertegen te zetten (hangkast: boven gelijk, onder- en kolomkast: onder gelijk), of op de bovenkant om ze erop te stapelen. Slepen over de vloer of de knoppen gaan ook.</span></div></div>`;
           return;
         }
         const pos = posOf(k);
@@ -848,6 +928,41 @@ function renderRoom(p, v) {
 }
 
 /** Afwerkpaneel aanpassen: maten, dikte, materiaal, decor, kantenband. */
+// MARK: - Afwerkpaneel verplaatsen
+
+const PN_OTHER = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] };
+/** Wereldbox van een afwerkpaneel. */
+function panelBox(pn) {
+  const b = panelPart(pn, S()).box;
+  return { x0: b.x, x1: b.x + b.w, y0: b.y, y1: b.y + b.h, z0: b.z, z1: b.z + b.d };
+}
+/** Paneel verschuiven met d = { x, y, z } (mm). */
+function movePanel(pn, d) {
+  for (const ax of ['x', 'y', 'z']) {
+    const v = Number(d[ax]) || 0;
+    if (!v) continue;
+    if (ax === pn.as) pn.vlak += v;
+    else if (PN_OTHER[pn.as][0] === ax) { pn.a0 += v; pn.a1 += v; }
+    else { pn.b0 += v; pn.b1 += v; }
+  }
+}
+/** Paneel op een wereldbox zetten (as en zin al gekozen). */
+function setPanelBox(pn, box) {
+  const [o0, o1] = PN_OTHER[pn.as];
+  pn.vlak = pn.zin > 0 ? box[`${pn.as}0`] : box[`${pn.as}1`];
+  pn.a0 = box[`${o0}0`]; pn.a1 = box[`${o0}1`];
+  pn.b0 = box[`${o1}0`]; pn.b1 = box[`${o1}1`];
+}
+/** Staand paneel een kwartslag draaien rond zijn linkerachterhoek (x ↔ z). */
+function rotatePanel(pn) {
+  if (pn.as === 'y') return;
+  const b = panelBox(pn), d = Number(pn.dikte) || S().front;
+  const len = pn.as === 'x' ? b.z1 - b.z0 : b.x1 - b.x0;
+  pn.as = pn.as === 'x' ? 'z' : 'x'; pn.zin = 1;
+  setPanelBox(pn, pn.as === 'z' ? { x0: b.x0, x1: b.x0 + len, y0: b.y0, y1: b.y1, z0: b.z0, z1: b.z0 + d }
+    : { x0: b.x0, x1: b.x0 + d, y0: b.y0, y1: b.y1, z0: b.z0, z1: b.z0 + len });
+}
+
 function openPanel(project, pn, onChange) {
   const pp = panelPart(pn, S());
   const e1 = Math.abs(pn.a1 - pn.a0), e2 = Math.abs(pn.b1 - pn.b0);
@@ -862,6 +977,10 @@ function openPanel(project, pn, onChange) {
       ${row('Plaattype', selectHTML('pn-type', [['', `Standaard (${pp.plaattype})`], ...PLAATTYPES.map(x => [x, x])], pn.plaattype ?? ''))}
       ${row('Kantenband rondom', selectHTML('pn-band', [['', `Standaard (${S().bandFront} mm)`], ['0', 'Geen'], ['1', '1 mm'], ['2', '2 mm']], pn.band == null ? '' : String(pn.band)))}
     </div><div class="group-footer">De maat telt vanaf het eerste punt dat je aantikte. Het paneel ligt tegen het vlak dat je koos; de dikte gaat naar buiten.</div></div>
+    <div class="group"><div class="group-header">Plaats</div><div class="group-body">
+      ${(() => { const bx = panelBox(pn); return row('X (linkerkant)', numHTML('pn-x', r1(bx.x0))) + row('Y (onderkant)', numHTML('pn-y', r1(bx.y0))) + row('Z (achterkant)', numHTML('pn-z', r1(bx.z0))); })()}
+      ${pn.as !== 'y' ? `<button class="row button" type="button" id="pn-rot">Kwartslag draaien</button>` : ''}
+    </div><div class="group-footer">Makkelijker: "Verplaatsen" in 3D, tik het paneel aan en sleep het, of tik op de zijkant van een kast om het ertegen te zetten.</div></div>
     <div class="group"><div class="group-body"><button class="row button danger" type="button" id="pn-del">Paneel verwijderen</button></div></div></div>`);
   const sheet = openSheet({ title: pn.naam || 'Afwerkpaneel', left: { label: 'Klaar' }, body, onClose: onChange });
   const save = () => { touch(project); };
@@ -873,6 +992,8 @@ function openPanel(project, pn, onChange) {
   bindDecor($('#pn-decor', body), val => { pn.decor = val || null; save(); });
   $('#pn-type', body).addEventListener('change', e => { pn.plaattype = e.target.value || null; save(); });
   $('#pn-band', body).addEventListener('change', e => { pn.band = e.target.value === '' ? null : Number(e.target.value); save(); });
+  for (const ax of ['x', 'y', 'z']) $(`#pn-${ax}`, body).addEventListener('change', e => { if (e.target.value === '') return; movePanel(pn, { [ax]: Number(e.target.value) - panelBox(pn)[`${ax}0`] }); save(); });
+  $('#pn-rot', body)?.addEventListener('click', () => { rotatePanel(pn); save(); sheet.close(); });
   $('#pn-del', body).addEventListener('click', () => { project.panelen = (project.panelen ?? []).filter(x => x !== pn); save(); sheet.close(); });
 }
 
