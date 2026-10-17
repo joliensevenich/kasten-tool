@@ -756,7 +756,8 @@ function openBulkEdit(p, ks, onDone) {
       ['scharnierKant', 'Scharnieren (1 deur)', 'sel', OPTIONS.scharnierKant], ['houtDoorlopend', 'Houtstructuur fronten', 'sel', [['nee', 'Niet doorlopend'], ['kast', 'Doorlopend in deze kast'], ['vorige', 'Doorlopend met de vorige kast']]]]],
     ['Korpus', [['top', 'Bovenkant', 'sel', OPTIONS.top], ['rugDikte', 'Dikte rug', 'num'], ['legplanken', 'Legplanken per vak (deur/open)', 'num']]],
     ['Paslatten en zijpanelen', [['paslat_links', 'Paslat links', 'num'], ['paslat_rechts', 'Paslat rechts', 'num'], ['paslat_boven', 'Paslat boven', 'num'],
-      ['zijpaneel_links', 'Zijpaneel links', 'sel', jaNee], ['zijpaneel_rechts', 'Zijpaneel rechts', 'sel', jaNee]]],
+      ['zijpaneel_links', 'Zijpaneel links', 'sel', jaNee], ['zijpaneel_rechts', 'Zijpaneel rechts', 'sel', jaNee],
+      ['zijpaneelFront', 'Front en zijpaneel', 'sel', [['gelijk', 'Paneel gelijk met het front (155°-scharnier)'], ['over', 'Front loopt over het paneel']]], ['zijpaneelDikte', 'Dikte zijpaneel', 'num']]],
   ];
   const groups = [['Algemeen', uniq], ...extra];
   const all = groups.flatMap(([, d]) => d);
@@ -2447,9 +2448,11 @@ const SettingsView = {
         </div></div>`).join('')}
         <div class="group-footer" data-cat="lades" style="margin:-16px 0 24px">Controleer de Blum-maten met de montagehandleiding van de gebruikte geleider en ladehoogte.</div>
         <div class="group"><div class="group-body"><button class="row button danger" type="button" id="st-reset">Standaardwaarden herstellen</button></div></div>
-        <div class="group"><div class="group-body"><div class="row"><span class="row-label">Versie</span><span class="row-value">0.2 (met MPR, nog te testen)</span></div></div>
+        <div class="group"><div class="group-body"><div class="row"><span class="row-label">Versie</span><span class="row-value" id="app-versie">0.2</span></div></div>
           <div class="footer-logo" role="img" aria-label="e. baillien"></div></div>
       </div>`;
+    // Versie = naam van de bewaarde app-versie (sw.js), bv. kasten-v218 → v218.
+    caches?.keys?.().then(keys => { const k = keys.filter(x => x.startsWith('kasten-v')).sort((a, b) => parseInt(a.slice(8)) - parseInt(b.slice(8))).pop(); if (k) $('#app-versie', v).textContent = k.replace('kasten-', ''); }).catch(() => {});
     for (const [, fields] of SETTING_GROUPS) for (const [key] of fields) {
       $(`#st-${key}`, v).addEventListener('change', e => { if (e.target.value !== '') { s[key] = Number(e.target.value); Store.save(); } });
     }
