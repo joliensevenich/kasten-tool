@@ -267,6 +267,7 @@ const PRESETS = [
   { id: 'boven-deuren', naam: 'Bovenkast met deuren', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('deur', { legplanken: 2 })] } },
   { id: 'boven-klep', naam: 'Bovenkast met klepdeur', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('klep', { legplanken: 1 })] } },
   { id: 'boven-dampkap', naam: 'Bovenkast boven dampkap', groep: 'Bovenkasten', kast: { plint: 'geen', top: 'vol', secties: [sec('deur')] } },
+  { id: 'boognis', naam: 'Boognis (open met gebogen opening)', groep: 'Kolomkasten', kast: { top: 'vol', plint: 'geen', boog: { piek: 35 }, secties: [sec('open', { legplanken: 0 })] } },
   // Verborgen (vervangen door de optie "Zonder fronten" bij elke kast); blijft voor bestaande projecten.
   { id: 'open', naam: 'Open kast', groep: 'Bovenkasten', verborgen: true, kast: { plint: 'geen', top: 'vol', secties: [sec('open', { legplanken: 2 })] } },
 ];
@@ -642,7 +643,8 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
 
   // Indeling in zones (van onder naar boven)
   const secs = k.secties?.length ? k.secties : [sec('open')];
-  const hasBodem = !(secs[0].type === 'toestel' && secs[0].opVloer);
+  // Geen bodem: een toestel op de vloer, of een boognis die op een tablet of kast staat (k.boog.bodem uit).
+  const hasBodem = !(secs[0].type === 'toestel' && secs[0].opVloer) && !(k.boog && !k.boog.bodem);
   const hasToestel = secs.some(s => s.type === 'toestel');
   // Verluchting alleen helemaal onder (dubbele bodem) en helemaal boven (dubbele regel) in de kast.
   const verl = hasToestel && (k.verluchting ?? secs.some(s => s.verluchting));
@@ -1557,6 +1559,125 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     });
   }
 
+  // Buigtriplex per stuk: lang of kort buigend, en in die richting op de plaat (grain = richting langs de 2440).
+  const buigMelding = new Set();
+  const buigZetten = v => {
+    const kz = buigKeuze(v.uLen, v.vLen, S, k.rond?.buigRichting);
+    v.buigRichting = kz.richting;
+    v.grain = kz.richting === 'lang' ? 'u' : 'v';
+    const naam = v.naam.replace(/ \(laag \d+\)$/, '');
+    if (buigMelding.has(naam)) return;
+    buigMelding.add(naam);
+    const N = S.nest ?? {}, pl = `${Number(N.buigLengte) || 2440} × ${Number(N.buigBreedte) || 1220}`;
+    if (!kz.past) warnings.push(`${naam}: ${Math.round(v.uLen)} × ${Math.round(v.vLen)} past niet op een plaat buigtriplex van ${pl} (lang of kort buigend); in stukken verdelen.`);
+    else if (kz.omgezet) warnings.push(`${naam}: past niet op ${k.rond.buigRichting} buigend buigtriplex; ${kz.richting} buigend gebruikt.`);
+  };
+  // Boognis: een open kast met vooraan een frontplaat waar een gebogen opening uit gefreesd wordt. De opening loopt recht
+  // langs de zijwanden en de bodem; de bovenkant is één grote boog (twee kwartellipsen die in de top vloeiend in elkaar
+  // overgaan). De binnenkant van de boog: rondTriplexLagen × buigtriplex + HPL, gedragen door boogribben (achter de
+  // frontplaat, voor de rug en zo nodig ertussen) met Clamex in de zijwanden.
+  if (k.boog) {
+    const bg = k.boog;
+    const hp = S.rondHplDikte, ply = S.rondTriplexDikte * S.rondTriplexLagen;
+    const metBodem = !!bg.bodem;
+    const xi0 = t, xi1 = W - t, yb = metBodem ? t : 0, yTop = H - t;   // binnenkant van de kast (zonder bodem: tot onderaan)
+    const binnenB = xi1 - xi0;
+    const yT = Math.min(Number(bg.top) || yTop - 150, yTop - hp - ply - 40);
+    const yL = Math.min(Number(bg.links) || Math.round(H * 0.45), yT - 20), yR = Math.min(Number(bg.rechts) || Math.round(H * 0.5), yT - 20);
+    const px = xi0 + binnenB * Math.min(0.9, Math.max(0.1, (Number(bg.piek) || 35) / 100));
+    const aL = px - xi0, bL = yT - yL, aR = xi1 - px, bR = yT - yR;
+    // Zichtlijn van de boog (HPL-oppervlak), van links naar rechts.
+    const N = 28, C = [];
+    for (let i = 0; i <= N; i++) { const th = Math.PI / 2 * i / N; C.push([px - aL * Math.cos(th), yL + bL * Math.sin(th)]); }
+    for (let i = N - 1; i >= 0; i--) { const th = Math.PI / 2 * i / N; C.push([px + aR * Math.cos(th), yR + bR * Math.sin(th)]); }
+    // Evenwijdige lijn naar buiten (boven de opening) op afstand e.
+    const off = e => C.map((q, i) => {
+      const a0 = C[Math.max(0, i - 1)], a1 = C[Math.min(C.length - 1, i + 1)];
+      const tx = a1[0] - a0[0], ty = a1[1] - a0[1], l = Math.hypot(tx, ty) || 1;
+      return [q[0] - ty / l * e, q[1] + tx / l * e];
+    }).map(([x, y]) => [Math.min(xi1, Math.max(xi0, x)), y]);
+    const lenOf = pts => pts.slice(1).reduce((a2, q, i) => a2 + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0);
+    const rmin = Math.min(bL * bL / aL, aL * aL / bL, bR * bR / aR, aR * aR / bR);
+    if (rmin < S.rondHplMinRadius) warnings.push(`Boognis: de krapste bocht is R ${r1(rmin)} mm, kleiner dan de kleinste buigradius van de HPL (${S.rondHplMinRadius} mm). Zet de boog hoger of de top verder van de kant.`);
+    if (yL < yb + 100 || yR < yb + 100) warnings.push('Boognis: de boog komt erg laag aan de zijkant.');
+
+    // Frontplaat met de opening (zoals een opliggende front, in het vlak van de fronten ernaast).
+    const fx0 = v / 2, fy0 = v / 2;
+    const bf = add({ id: 'boogfront', naam: 'Boogfront (frontplaat met opening)', rol: 'afwerk', mat: 'front', dikte: fd, grain: 'v',
+      edges: { u0: S.bandFront, u1: S.bandFront, v0: S.bandFront, v1: S.bandFront },
+      box: { x: fx0, y: fy0, z: D, w: W - v, h: H - v, d: fd }, uLen: W - v, vLen: H - v });
+    const waste = [(xi0 + xi1) / 2 - fx0, (Math.max(yb, fy0) + Math.min(yL, yR)) / 2 - fy0];
+    if (metBodem) {
+      // Opening binnen de plaat: gesloten contour.
+      const opening = [[xi0, yb], [xi1, yb], ...C.slice().reverse(), [xi0, yb]].map(([x, y]) => [x - fx0, y - fy0]);
+      bf.ops.push({ kind: 'contour', pts: opening, waste, lead: 0, naam: 'Boogopening' });
+      bf.shape3d = { plane: 'xy', pts: [[0, 0], [bf.box.w, 0], [bf.box.w, bf.box.h], [0, bf.box.h]], holes: [opening.slice(0, -1)] };
+    } else {
+      // Geen bodem (staat op een tablet): de opening loopt tot onderaan, de plaat is een omgekeerde U.
+      const pad = [[xi0, fy0], ...C, [xi1, fy0]].map(([x, y]) => [x - fx0, y - fy0]);
+      bf.ops.push({ kind: 'contour', pts: pad, waste, lead: 20, naam: 'Boogopening' });
+      bf.shape3d = { plane: 'xy', pts: [[0, 0], [xi0 - fx0, 0], ...C.map(([x, y]) => [x - fx0, y - fy0]), [xi1 - fx0, 0], [bf.box.w, 0], [bf.box.w, bf.box.h], [0, bf.box.h]] };
+      warnings.push('Boognis zonder bodem: de zijwanden staan op het tablet (of de kast eronder) en worden van onderuit vastgeschroefd; de frontplaat is een omgekeerde U.');
+    }
+    warnings.push('Boognis: de rand van de opening in de frontplaat afwerken (kantenband met de hand of een HPL-strook); de hoeken onderaan krijgen de straal van de frees.');
+
+    // Boogribben: het stuk tussen de buitenkant van het buigtriplex en de top, over de binnenbreedte.
+    const Co = off(hp + ply);
+    const zR0 = rugFront, zR1 = D;                           // ruimte voor de ribben (rug tot voorkant korpus)
+    const ribZs = [zR1 - t, zR0];
+    const tussen = Math.ceil((zR1 - zR0 - 2 * t) / 500) - 1;
+    for (let i = 1; i <= tussen; i++) ribZs.push(zR0 + i * (zR1 - zR0 - t) / (tussen + 1));
+    const yMinCo = Math.min(...Co.map(q => q[1]));
+    ribZs.sort((a2, b2) => b2 - a2).forEach((z, i) => {
+      const poly = [...Co, [xi1, yTop], [xi0, yTop]];
+      const rib = add({ id: `boogrib-${i + 1}`, naam: `Boogrib ${i === 0 ? 'voor' : z === zR0 ? 'achter' : i + 1}`, rol: 'liggend', mat: 'korpus', dikte: t, grain: 'u', edges: {},
+        box: { x: xi0, y: yMinCo, z, w: binnenB, h: yTop - yMinCo, d: t }, uLen: binnenB, vLen: yTop - yMinCo });
+      rib.shape3d = { plane: 'xy', pts: poly.map(([x, y]) => [x - xi0, y - yMinCo]) };
+      rib.ops.push({ kind: 'contour', pts: Co.map(([x, y]) => [x - xi0, y - yMinCo]), waste: [binnenB / 2, 0], lead: 20, naam: 'Boog' });
+      // Clamex aan beide uiteinden in de zijwanden (halverwege het rechte stuk van de rib tegen de zijwand).
+      for (const [left, yE] of [[true, Co[0][1]], [false, Co[Co.length - 1][1]]]) {
+        const yc = (yE + yTop) / 2, sd2 = left ? sideL : sideR;
+        if (yTop - yE < 60) continue;
+        rib.ops.push({ kind: 'clamex', edge: left ? 'u0' : 'u1', pos: yc - yMinCo, naam: 'Clamex' });
+        sd2.ops.push({ kind: 'clamex', face: 'binnen', u: sideU(z + t / 2), v: sideV(yc), dir: [0, 1], naam: 'Clamex' });
+        count('Lamello Clamex P-14');
+      }
+    });
+
+    // Buigtriplex (lagen) en HPL langs de boog, over de hele diepte (achter de frontplaat tot de rug).
+    const dz = zR1 - zR0;
+    const band = (e0, e1) => { const A2 = off(e0), B2 = off(e1); return [...A2, ...B2.reverse()]; };
+    const shapedXY = (o, poly) => {
+      const xs = poly.map(q => q[0]), ys = poly.map(q => q[1]), bx = Math.min(...xs), by = Math.min(...ys);
+      return add({ ...o, box: { x: bx, y: by, z: zR0, w: Math.max(...xs) - bx, h: Math.max(...ys) - by, d: dz },
+        shape3d: { plane: 'xy', pts: poly.map(([x, y]) => [x - bx, y - by]) } });
+    };
+    const maxL = (Number(S.nest?.buigLengte) || 2440) - 2 * (Number(S.nest?.randafzaag) || 10);
+    const midLen = lenOf(off(hp + ply / 2));
+    const stukken = midLen > maxL ? Math.ceil(midLen / maxL) : 1;
+    if (stukken > 1) warnings.push(`Boognis: het buigtriplex (${Math.round(midLen)} mm langs de boog) past niet in één stuk; ${stukken} stukken per laag, laat de naden van de lagen verspringen en zet een lat achter elke naad.`);
+    const midPts = off(hp + ply / 2), cum = [0];
+    for (let i = 1; i < midPts.length; i++) cum.push(cum[i - 1] + Math.hypot(midPts[i][0] - midPts[i - 1][0], midPts[i][1] - midPts[i - 1][1]));
+    const splitAt = j => j <= 0 ? 0 : j >= stukken ? C.length - 1 : cum.reduce((best, c, i) => Math.abs(c - j * midLen / stukken) < Math.abs(cum[best] - j * midLen / stukken) ? i : best, 0);
+    for (let i = 0; i < S.rondTriplexLagen; i++) {
+      const e0 = hp + i * S.rondTriplexDikte, e1 = e0 + S.rondTriplexDikte;
+      for (let sI = 0; sI < stukken; sI++) {
+        // Stuk sI van de boog: gelijke lengtes langs de middellijn.
+        const n0 = splitAt(sI), n1 = splitAt(sI + 1);
+        const A2 = off(e0).slice(n0, n1 + 1), B2 = off(e1).slice(n0, n1 + 1);
+        const pc = shapedXY({ naam: `Buigtriplex boognis${stukken > 1 ? ` stuk ${sI + 1}` : ''} (laag ${i + 1})`, rol: 'rondhuid', mat: 'buig', dikte: S.rondTriplexDikte, grain: 'u', edges: {}, kleurVast: '#d8b98a' }, [...A2, ...B2.reverse()]);
+        pc.uLen = lenOf(off((e0 + e1) / 2).slice(n0, n1 + 1)); pc.vLen = dz;
+        buigZetten(pc);
+      }
+    }
+    const hpl = shapedXY({ naam: 'HPL boognis', rol: 'rondhuid', mat: 'hpl', dikte: hp, grain: 'u', edges: {}, nietZagen: true }, band(0, hp));
+    hpl.uLen = lenOf(off(hp / 2)) + 2 * S.rondOvermaat; hpl.vLen = dz + S.rondOvermaat;
+    order(`HPL ${k.decorFront || S.decorFront} ${hp} mm voor boognis: ${Math.round(hpl.uLen)} × ${Math.round(hpl.vLen)}`, 1);
+    const hplMax = Number(S.nest?.hplLengte) || 3050;
+    if (hpl.uLen > hplMax) warnings.push(`Boognis: het HPL (${Math.round(hpl.uLen)} mm langs de boog) is langer dan een plaat HPL (${hplMax}); een naad voorzien of een langer formaat bestellen.`);
+    warnings.push(`Boognis: opening ${r1(binnenB)} breed, zijkant links ${r1(yL - yb)} en rechts ${r1(yR - yb)} hoog, top ${r1(yT - yb)} (boven ${metBodem ? 'de bodem' : 'de onderkant'}), ${ribZs.length} boogribben, ${S.rondTriplexLagen} × buigtriplex ${S.rondTriplexDikte} mm + HPL.`);
+  }
+
   // Paslatten links/rechts: een frontpaslat in het vlak van de fronten (decor fronten) en een kastpaslat erachter,
   // haaks tegen de zijwand (zoals kastpaslat/frontpaslat in de P110-programma's): Clamex in de voorkant van de kastpaslat
   // en in het vlak van de frontpaslat; de kastpaslat wordt door de zijwand vastgeschroefd.
@@ -1669,19 +1790,6 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // (rondTriplexLagen × rondTriplexDikte) in komt; tussenribben en opstaanders; HPL over alles. Clamex met deuvels.
   // Open: ronde bodem, top en legplanken met Clamex en deuvels. Plint (met Trespa) en werkblad rond mee.
   // Ronde kant links, rechts of aan beide kanten (dan dezelfde instellingen aan elke kant).
-  // Buigtriplex per stuk: lang of kort buigend, en in die richting op de plaat (grain = richting langs de 2440).
-  const buigMelding = new Set();
-  const buigZetten = v => {
-    const kz = buigKeuze(v.uLen, v.vLen, S, k.rond?.buigRichting);
-    v.buigRichting = kz.richting;
-    v.grain = kz.richting === 'lang' ? 'u' : 'v';
-    const naam = v.naam.replace(/ \(laag \d+\)$/, '');
-    if (buigMelding.has(naam)) return;
-    buigMelding.add(naam);
-    const N = S.nest ?? {}, pl = `${Number(N.buigLengte) || 2440} × ${Number(N.buigBreedte) || 1220}`;
-    if (!kz.past) warnings.push(`${naam}: ${Math.round(v.uLen)} × ${Math.round(v.vLen)} past niet op een plaat buigtriplex van ${pl} (lang of kort buigend); in stukken verdelen.`);
-    else if (kz.omgezet) warnings.push(`${naam}: past niet op ${k.rond.buigRichting} buigend buigtriplex; ${kz.richting} buigend gebruikt.`);
-  };
   const rondKanten = k.rond?.kant === 'beide' ? ['links', 'rechts'] : [k.rond?.kant];
   for (const rd of rondKanten.filter(x => x === 'links' || x === 'rechts').map(kant => ({ ...k.rond, kant }))) {
     const left = rd.kant === 'links';

@@ -193,7 +193,8 @@ const Projects = {
     $('#pj-schets', v).addEventListener('click', () => openSketchImport(p, made => {
       this.keepCamera = false; this.renderProject();
       if (made.length) alertBox(`${made.length} ${made.length === 1 ? 'kast' : 'kasten'} gemaakt`, 'Kijk ze na en pas de details aan zoals altijd (tik op een kast). Een tweede wand staat ernaast: zet hem met Verplaatsen in de hoek. Niet goed? Stap terug met ↶.'
-        + (made.nieuweTypes?.length ? ` Nieuwe kasttypes bewaard (bij "Kast toevoegen", in elk project): ${made.nieuweTypes.join(', ')}.` : ''));
+        + (made.nieuweTypes?.length ? ` Nieuwe kasttypes bewaard (bij "Kast toevoegen", in elk project): ${made.nieuweTypes.join(', ')}.` : '')
+        + (made.notes?.length ? ` ${made.notes.join(' ')}` : ''));
     }));
     $('#pj-select', v)?.addEventListener('click', () => { this.selectMode = !this.selectMode; this.selected = new Set(); this.keepCamera = true; this.renderProject(); });
     $('#pj-mpr', v).addEventListener('click', () => exportMpr(p));
@@ -1227,6 +1228,12 @@ function openCabinet(project, k, selectId = null) {
         ${k.zijpaneel?.links || k.zijpaneel?.rechts ? `${k.front !== 'inliggend' && !k.zonderFronten ? row('Front en zijpaneel', selectHTML('f-zijpaneelFront', [['gelijk', 'Paneel gelijk met het front (front ernaast, 155°-scharnier)'], ['over', 'Front loopt over het paneel']], zijpaneelMode(k))) : ''}
           ${row('Dikte zijpaneel', numHTML('f-zijpaneelDikte', k.zijpaneelDikte, `${zijpaneelDikte({ ...k, zijpaneelDikte: null }, cabinetSettings(k, S()))} (standaard)`))}
           ${zijpaneelMode(k) === 'gelijk' && k.front !== 'inliggend' && !k.zonderFronten ? `<div class="row"><span class="row-sub">Het front zit naast het paneel: het paneel mag maximaal ${S().zijpaneelNaastFront} mm dik zijn, anders gaat de deur niet open. Aan die kant komen 155°-scharnieren.</span></div>` : ''}` : ''}
+        ${k.boog ? `<div class="row sub-head"><span class="row-sub"><b>Boogopening</b> (hoogtes vanaf de onderkant van de opening)</span></div>
+          <div class="row"><span class="row-label">Bodem in de nis (uit = staat op een tablet of kast)</span>${toggleHTML('f-boogBodem', !!k.boog.bodem)}</div>
+          ${row('Boog: hoogte aan de linkerkant', numHTML('f-boogL', k.boog.links, `${Math.round((Number(k.hoogte) || 0) * 0.45)} (standaard)`))}
+          ${row('Boog: hoogte aan de rechterkant', numHTML('f-boogR', k.boog.rechts, `${Math.round((Number(k.hoogte) || 0) * 0.5)} (standaard)`))}
+          ${row('Boog: hoogte van de top', numHTML('f-boogT', k.boog.top, 'bijna tot boven'))}
+          ${row('Boog: plaats van de top (% vanaf links)', numHTML('f-boogP', k.boog.piek, '35'))}` : ''}
         ${row('Ronde kant', selectHTML('f-rondKant', [['', 'Geen'], ['links', 'Links'], ['rechts', 'Rechts'], ['beide', 'Beide kanten']], k.rond?.kant ?? ''))}
         ${k.rond?.kant ? `${row('Vorm', selectHTML('f-rondVorm', [['kwart', 'Kwartrond (voorhoek)'], ['half', 'Halfrond (hele diepte)'], ['kop2', 'Halfrond over 2 kasten (kop van een eiland, rug aan rug)'], ['vrij', 'Vrije vorm (golf, druppel, ...)']], k.rond.vorm ?? 'kwart'))}
           ${k.rond.vorm === 'vrij' ? vrijeVormHTML(k.rond) : ''}
@@ -1303,6 +1310,8 @@ function openCabinet(project, k, selectId = null) {
     for (const kant of ['links', 'rechts']) $(`#f-zp-${kant}`, form)?.addEventListener('change', e => { k.zijpaneel = { ...(k.zijpaneel ?? {}), [kant]: e.target.checked }; renderForm(); update(); });
     $('#f-zijpaneelDikte', form)?.addEventListener('input', e => { k.zijpaneelDikte = e.target.value === '' ? null : Number(e.target.value); update(); });
     $('#f-zijpaneelFront', form)?.addEventListener('change', e => { k.zijpaneelFront = e.target.value; renderForm(); update(); });
+    $('#f-boogBodem', form)?.addEventListener('change', e => { k.boog = { ...k.boog, bodem: e.target.checked }; update(); });
+    for (const [id, key] of [['f-boogL', 'links'], ['f-boogR', 'rechts'], ['f-boogT', 'top'], ['f-boogP', 'piek']]) $(`#${id}`, form)?.addEventListener('input', e => { k.boog = { ...k.boog, [key]: e.target.value === '' ? null : Number(e.target.value) }; update(); });
     $('#f-rondKant', form)?.addEventListener('change', e => { k.rond = e.target.value ? { vorm: 'kwart', uitvoering: 'dicht', ...(k.rond ?? {}), kant: e.target.value } : null; renderForm(); update(); });
     $('#f-rondVorm', form)?.addEventListener('change', e => { k.rond = { ...k.rond, vorm: e.target.value }; renderForm(); update(); });
     $('#f-rondUit', form)?.addEventListener('change', e => { k.rond = { ...k.rond, uitvoering: e.target.value }; renderForm(); update(); });

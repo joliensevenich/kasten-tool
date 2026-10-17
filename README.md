@@ -40,7 +40,9 @@ kasten die je aanpast zoals altijd (niet goed: ↶ zet alles terug).
 
 Ook ronde kanten (R300 = kwartrond, HR = halfrond, KOP = eilandkop, GOLF/DRUPPEL = vrije vorm, ROPEN = open), eilanden
 met kasten rug aan rug (EILAND, de achterkant apart getekend) en verticale verdelingen (|3 of |400|200) worden gelezen.
-Een kast die niet in de lijst staat, teken je met haar vakken en een naam (bv. "tv-meubel"): de app maakt ze en bewaart
+Een kast die bovenop de onderkasten staat (OP), een tablet (werkblad) op de onderkasten, een boognis (open stuk met een
+gebogen opening, kasttype "Boognis") en een losse ronde zuil (ZUIL) worden ook gelezen, en het blad mag
+gedraaid zijn. Een kast die niet in de lijst staat, teken je met haar vakken en een naam (bv. "tv-meubel"): de app maakt ze en bewaart
 ze als eigen kasttype.
 
 ### API-sleutel aanmaken

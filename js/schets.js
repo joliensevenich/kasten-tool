@@ -30,6 +30,8 @@ const SCHETS_CODES = [
   ['KOP', 'Ronde kop van een eiland (kasten rug aan rug)', 'eilandkop, ronde kop'],
   ['GOLF / DRUPPEL', 'Vrije vorm (golf, druppel, S-bocht, ellips) met de uitsteek erbij', 'golf 300, druppel'],
   ['ROPEN', 'Ronde kant open, met ronde legplanken', 'open rond'],
+  ['ZUIL', 'Losse ronde zuil (breedte en hoogte erbij)', 'ronde zuil'],
+  ['OP', 'Kast staat op de onderkasten (niet aan de muur)', 'staat op de onderkasten'],
 ];
 
 // Gangbare korpusmaten als de schets en het project niets zeggen.
@@ -41,10 +43,18 @@ const TOESTEL_NIS = { Oven: 590, Microgolf: 450, Koelkast: 1780, Wasmachine: 870
 const SCHETS_PROMPT = `Je leest een handgetekende schets van keukenkasten of kasten en zet ze om in kasten voor een tekenprogramma.
 
 HOE DE SCHETS GETEKEND IS
+- Het blad kan GEDRAAID zijn (bv. een kwartslag, de tekening dwars op het blad): bepaal eerst hoe het blad gedraaid
+  is aan de hand van de schrijfrichting van de getallen en waar de vloer is (de langste rij onderkasten staat op de vloer),
+  en lees alles alsof het rechtop staat. Zeg in "opmerkingen" hoe je het gedraaid hebt.
+- Ruitjespapier: de ruitjes zeggen niets over de maten.
 - Per wand een vooraanzicht van links naar rechts, vaak in perspectief: je ziet dan ook bovenkanten, zijkanten en diepte.
   De zijkanten in perspectief zijn GEEN aparte kasten. Breedtes en indeling lees je op de voorkanten.
-- NIET op schaal: gebruik alleen de geschreven maten, nooit de getekende grootte. Maten in mm; "60" of "60 cm" = 600 mm,
-  "2,1 m" = 2100 mm. Een getal onder of boven een kast is zijn breedte; een maatlijn aan de zijkant is een hoogte; een maat
+- NIET op schaal: een geschreven maat gaat altijd voor op de getekende grootte. Maten in mm; "60" of "60 cm" = 600 mm,
+  "2,1 m" = 2100 mm.
+- Waar GEEN maat staat (breedte van een kast in een rij, hoogte van een boog, een vak): schat ze uit de VERHOUDINGEN van
+  de tekening ten opzichte van de maten die er wel staan (bv. een kast die half zo breed getekend is als een stuk van
+  1500 ≈ 750), zodat het resultaat in verhouding is met de schets; rond af op 10 mm en zet in "onzeker" dat het geschat is.
+  Kasten die even groot getekend zijn, krijgen dezelfde maat; breedtes in een rij tellen op tot de totaalmaat. Een getal onder of boven een kast is zijn breedte; een maatlijn aan de zijkant is een hoogte; een maat
   langs een schuine (wijkende) lijn is de diepte.
 - Hoogte en diepte staan vaak maar één keer per rij: laat ze dan leeg bij de andere kasten van die rij.
 - Een totaalmaat over de hele wand (bv. "3200" over alles): zet die in "totaal" en controleer dat de breedtes optellen.
@@ -59,6 +69,35 @@ ${SCHETS_CODES.map(([c, n, w]) => `- ${c}: ${n} (in woorden: ${w})`).join('\n')}
 ZIJPANELEN
 - Een dik getekende of gearceerde zijkant, "ZP", of een paneel naast een kast tot de vloer of het werkblad: zijpaneel.
 
+KAST OP DE ONDERKASTEN
+- Een kast die bovenop de onderkasten staat (niet aan de muur hangt, de onderkant rust op de onderrij): rij "boven",
+  "staatOp": true, soort "kolom" als ze hoog is (deuren over een grote hoogte) anders "hang". Haar hoogte = van de
+  bovenkant van de onderkasten tot haar bovenkant (een totale hoogte van de vloer min de hoogte van de onderrij).
+
+VRAGEN AAN DE GEBRUIKER
+- Doel: het resultaat moet voor 99 % kloppen. Twijfel je over iets dat echt verschil maakt (wat een element is, hoe het
+  blad gedraaid is, of iets op de onderkasten staat of hangt, een ronde kant, een tablet, een ontbrekende maat die je niet
+  goed kunt schatten, aantal lades, de vorm van een boog ...), stel er dan een vraag over in "vragen" (hoogstens 6, de
+  belangrijkste eerst). Elke vraag: kort en concreet, met 2 tot 4 "opties" (korte antwoorden, je beste gok eerst) en in
+  "waarom" wat er van afhangt. Vul de kasten intussen in met je beste gok. Geen vragen als alles duidelijk is.
+
+BOOGNIS (open stuk met een gebogen opening)
+- Een open stuk (vaak naast een kast, op de onderkasten) waarvan de opening recht is langs de zijkanten en onderaan en
+  bovenaan één grote boog heeft (een gebogen lijn binnen een rechthoek): soort "nis", met "boog": "links" = hoogte waar
+  de boog de linkerkant raakt, "rechts" = idem rechts, "top" = hoogste punt van de boog (allemaal vanaf de onderkant van
+  de nis), "piek" = plaats van het hoogste punt in % van de breedte vanaf links. Schat die uit de tekening als er geen
+  maten staan (de schets is niet op schaal: zeg het in "onzeker"). Een "zuil" of "opening" met een boog is meestal dit.
+
+TABLET / WERKBLAD
+- Een blad over de onderkasten (dikke band bovenop de onderrij, vaak met dezelfde ronde uiteinden): zet bij de wand
+  "werkblad": {"dikte": getal of null, "overstek": getal of null}. Kasten die op de onderkasten staan, staan op dit blad.
+
+RONDE ZUIL
+- Een losstaande ronde zuil (een grote boog of cilinder, "zuil", "kolom rond") naast een kast: een eigen element met
+  soort "zuil", "breedte" = de breedte van de zuil, "hoogte", en "rond" met vorm "half" (rond aan beide kanten, zoals een
+  cilinder of afgeronde zuil) of "vrij" (een organische bolling, met "uitsteek"); "rond.uitvoering": "open" als er
+  legplanken in getekend zijn. Staat de zuil op de onderkasten: rij "boven" en "staatOp": true.
+
 RONDE OMKASTINGEN (ronde kanten)
 - Een afgeronde hoek of zijkant naast een kast (in perspectief: een boog op de bovenkant en de onderkant, of gebogen
   arcering), "R300", "r=300", "rond", "kwartrond", "halfrond", "ronde kop": zet "rond" bij de kast waaraan hij vastzit.
@@ -70,6 +109,9 @@ RONDE OMKASTINGEN (ronde kanten)
 - vorm "vrij": een organische vorm (golf, druppel, S-bocht, ellips): "vrijVorm" en "uitsteek" (hoe ver hij uitsteekt).
 - "uitvoering": "open" als er legplanken in de ronde kant getekend zijn (open ronde vakken, "open rond"), anders "dicht".
 - "kant": "links" of "rechts" van die kast; "beide" als beide kanten rond zijn.
+- Een rij met een ronde afwerking links en rechts: de eerste kast van de rij krijgt "rond" links, de laatste "rond" rechts
+  (één kast alleen: "beide"). Een maat zoals 300 bij een afgeronde hoek is de radius.
+- Een totaalmaat over een rij met ronde uiteinden is inclusief de ronde stukken (kwartrond: de radius per kant).
 
 EILAND
 - Een vrijstaand blok (geen muur erachter, of het woord EILAND), vaak met kasten aan beide kanten (rug aan rug): "eiland": true.
@@ -91,14 +133,35 @@ INDELING
   legplanken als die zo aangeduid zijn; gewone legplanken in "legplanken".
 - Een onderkast zonder info: één vak "deur". L2+1 = vak lade aantal 2 en daaronder vak lade aantal 1.
   Kookplaat (KP) zonder verdere info: 2 lades. Spoelbak (SP): vak deur en "spoelbak": true.
-- Vul "tekst" met wat er letterlijk bij de kast staat, en "onzeker" met wat je niet zeker kon lezen (anders leeg).
-Geef je antwoord met de tool "kasten".`;
+- Vul "tekst" met wat er letterlijk bij de kast staat, en "onzeker" met wat je niet zeker kon lezen (anders leeg).`;
+
+// Antwoordvorm in tekst: eerst kort nadenken, dan de JSON (zo leest Claude de schets nauwkeuriger dan met een verplichte tool).
+const SCHETS_VORM = `
+ANTWOORD
+1. Schrijf eerst kort tussen <analyse> en </analyse> wat je ziet: per wand de rijen van links naar rechts met de geschreven
+   maten en codes, ronde kanten, zijpanelen, eiland, en of de breedtes optellen tot een totaalmaat.
+2. Geef daarna de kasten als JSON in een blok \`\`\`json ... \`\`\`, in deze vorm (velden die je niet weet: null of weglaten):
+{"wanden":[{"naam":"Wand 1","eiland":false,"totaal":null,"werkblad":null,
+  "kasten":[{"rij":"onder","soort":"onder","x":0,"breedte":600,"hoogte":720,"diepte":560,
+    "vakken":[{"type":"lade","aantal":3}],"open":false,"greeploos":false,"spoelbak":false,"zijpaneelLinks":false,"zijpaneelRechts":false,
+    "rond":{"kant":"links","vorm":"kwart","radius":300,"breedte":null,"uitvoering":"dicht","legplanken":null,"vrijVorm":null,"uitsteek":null},
+    "nieuwType":null,"tekst":"O L3 R300","onzeker":null}],
+  "achterzijde":[]}],
+ "plintHoogte":null,"bovenOnderkant":null,"hoogteTotVloer":false,"opmerkingen":[],
+ "vragen":[{"vraag":"Staat de kast met deuren op de onderkasten of hangt ze aan de muur?","opties":["Op de onderkasten","Aan de muur"],"waarom":"bepaalt de hoogte en de plint"}]}
+Vakken: {"type":"deur","deuren":2,"legplanken":1}, {"type":"lade","aantal":3}, {"type":"klep"}, {"type":"open","legplanken":2},
+{"type":"toestel","naam":"Oven","nis":590}; verticaal verdeeld: "kolommen":3 of "kolomBreedtes":[400,200]; "vasteLegplanken":1.
+"soort": onder | hang | kolom | leeg | paslat | zuil | nis (met "boog":{"links":..,"rechts":..,"top":..,"piek":..}).
+"werkblad" bij de wand: {"dikte":38,"overstek":20} als er een tablet/blad op de onderkasten ligt. "rij": onder | boven. "staatOp": true = staat op de onderkasten. "rond" = null als er geen ronde kant is.
+vorm: kwart | half | kop2 | vrij; vrijVorm: ellips | golf | druppel | s.`;
 
 const SCHETS_ITEM = {
   type: 'object',
   properties: {
     rij: { type: 'string', enum: ['onder', 'boven'] },
-    soort: { type: 'string', enum: ['onder', 'hang', 'kolom', 'leeg', 'paslat'] },
+    soort: { type: 'string', enum: ['onder', 'hang', 'kolom', 'leeg', 'paslat', 'zuil', 'nis'] },
+    boog: { type: ['object', 'null'], properties: { links: { type: ['number', 'null'] }, rechts: { type: ['number', 'null'] }, top: { type: ['number', 'null'] }, piek: { type: ['number', 'null'] } } },
+    staatOp: { type: 'boolean' },
     x: { type: ['number', 'null'] },
     breedte: { type: ['number', 'null'] }, hoogte: { type: ['number', 'null'] }, diepte: { type: ['number', 'null'] },
     vakken: { type: 'array', items: { type: 'object', properties: {
@@ -126,9 +189,11 @@ const SCHETS_SCHEMA = {
   properties: {
     wanden: { type: 'array', items: { type: 'object', properties: {
       naam: { type: 'string' }, eiland: { type: 'boolean' }, totaal: { type: ['number', 'null'] },
+      werkblad: { type: ['object', 'null'], properties: { dikte: { type: ['number', 'null'] }, overstek: { type: ['number', 'null'] } } },
       kasten: { type: 'array', items: SCHETS_ITEM }, achterzijde: { type: 'array', items: SCHETS_ITEM } }, required: ['kasten'] } },
     plintHoogte: { type: ['number', 'null'] }, bovenOnderkant: { type: ['number', 'null'] }, hoogteTotVloer: { type: 'boolean' },
     opmerkingen: { type: 'array', items: { type: 'string' } },
+    vragen: { type: 'array', items: { type: 'object', properties: { vraag: { type: 'string' }, opties: { type: 'array', items: { type: 'string' } }, waarom: { type: ['string', 'null'] } }, required: ['vraag'] } },
   },
   required: ['wanden'],
 };
@@ -269,6 +334,7 @@ function schetsVoorbeeldPdf() {
   const uitleg = [
     'Ronde kant: zet R300 (kwartrond, straal 300), HR (halfrond) of KOP (eilandkop) aan de kant waar hij zit; ROPEN = open met ronde legplanken. Een vrije vorm: GOLF 300 / DRUPPEL 250 (uitsteek).',
     'Eiland met kasten rug aan rug: schrijf EILAND erbij en teken de achterkant eronder (van links naar rechts zoals je ze vanaf de voorkant ziet).',
+    'Het blad mag gedraaid zijn (de tekening dwars): de app zoekt zelf waar de vloer is.',
     'Nieuwe kast: teken de vakken (bv. open vak |3 boven, 2 lades onder) en schrijf er een naam bij, bv. "tv-meubel".','O L3 = onderkast met 3 lades  ·  K OV MG = kolomkast met oven en microgolf  ·  H D2 G = hangkast met 2 deuren, greeploos.',
     'In woorden bv.: "onderkast 3 lades 600", "hoge kast oven + microgolf", "open bovenkast 2 legplanken".',
     'De vakken van een hoge kast teken je van boven naar onder met een streep ertussen, met de code in elk vak.'];
@@ -296,31 +362,97 @@ async function schetsImage(file) {
   } finally { URL.revokeObjectURL(url); }
 }
 
-async function schetsLezen(base64, key, model) {
+/** Antwoord van Claude opschonen: velden die als JSON-tekst terugkomen (bv. "wanden": "[...]") alsnog omzetten. */
+function schetsNormaal(x) {
+  if (typeof x === 'string') {
+    const t = x.trim();
+    if ((t.startsWith('[') && t.endsWith(']')) || (t.startsWith('{') && t.endsWith('}'))) { try { return schetsNormaal(JSON.parse(t)); } catch { return x; } }
+    return x;
+  }
+  if (Array.isArray(x)) return x.map(schetsNormaal);
+  if (x && typeof x === 'object') return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, schetsNormaal(v)]));
+  return x;
+}
+/** JSON uit een tekstantwoord: het ```json-blok, anders van de eerste { tot de laatste }. */
+function schetsJsonUitTekst(text) {
+  const blok = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const kand = [blok?.[1], (() => { const a = text.indexOf('{', text.indexOf('</analyse>') + 1), b = text.lastIndexOf('}'); return a >= 0 && b > a ? text.slice(a, b + 1) : null; })(),
+    (() => { const a = text.indexOf('{'), b = text.lastIndexOf('}'); return a >= 0 && b > a ? text.slice(a, b + 1) : null; })()].filter(Boolean);
+  for (const k of kand) { try { return JSON.parse(k); } catch { /* volgende */ } }
+  return null;
+}
+const schetsHeeftKasten = d => Array.isArray(d?.wanden) && d.wanden.some(w => Array.isArray(w?.kasten) && w.kasten.length);
+/** Ontbrekende velden aanvullen, zodat de controlelijst en het maken nooit vastlopen. */
+function schetsSchoon(d) {
+  d.opmerkingen = Array.isArray(d.opmerkingen) ? d.opmerkingen.map(String) : [];
+  d.vragen = (Array.isArray(d.vragen) ? d.vragen : []).filter(q => q && q.vraag).slice(0, 6)
+    .map(q => ({ vraag: String(q.vraag), opties: (Array.isArray(q.opties) ? q.opties : []).map(String).slice(0, 4), waarom: q.waarom ? String(q.waarom) : '' }));
+  for (const w of d.wanden) for (const lijst of ['kasten', 'achterzijde']) {
+    w[lijst] = (Array.isArray(w[lijst]) ? w[lijst] : []).filter(it => it && typeof it === 'object');
+    for (const it of w[lijst]) {
+      if (!['onder', 'hang', 'kolom', 'leeg', 'paslat', 'zuil', 'nis'].includes(it.soort)) it.soort = it.rij === 'boven' ? 'hang' : 'onder';
+      if (it.rij !== 'boven' && it.rij !== 'onder') it.rij = it.soort === 'hang' ? 'boven' : 'onder';
+      it.vakken = (Array.isArray(it.vakken) ? it.vakken : []).filter(v => v && typeof v === 'object' && v.type);
+      if (it.rond && !(it.rond.kant && it.rond.vorm)) it.rond = null;
+    }
+  }
+  return d;
+}
+
+async function schetsVraag(key, payload) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model, max_tokens: 16000, system: SCHETS_PROMPT,
-      tools: [{ name: 'kasten', description: 'De kasten die op de schets staan, per wand.', input_schema: SCHETS_SCHEMA }],
-      tool_choice: { type: 'tool', name: 'kasten' },
-      messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-        { type: 'text', text: 'Lees deze schets. Kijk eerst goed naar alle geschreven maten en codes, ronde kanten en zijpanelen, controleer de optelling, en geef dan de kasten.' }] }] }),
+    body: JSON.stringify(payload),
   });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) {
     const msg = body?.error?.message || `HTTP ${r.status}`;
-    throw new Error(r.status === 401 ? 'De API-sleutel klopt niet.' : r.status === 429 ? 'Te veel aanvragen of geen tegoed meer op je API-account.' : msg);
+    throw new Error(r.status === 401 ? 'De API-sleutel klopt niet.' : r.status === 429 ? 'Te veel aanvragen of geen tegoed meer op je API-account.'
+      : r.status === 529 || r.status === 503 ? 'De dienst van Anthropic is even overbelast; probeer het over een minuut opnieuw.' : `${msg} (fout ${r.status})`);
   }
+  return body;
+}
+
+/**
+ * Schets lezen. vorige = { data, antwoorden: [{ vraag, antwoord }] }: de eerste lezing en de antwoorden van de gebruiker op
+ * de vragen; Claude past de lezing dan aan (en stelt alleen nog vragen als iets echt onduidelijk blijft).
+ */
+async function schetsLezen(base64, key, model, vorige = null) {
+  const beeld = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } };
+  const vraagTekst = vorige ? `Lees deze schets. Je eerste lezing was:\n${JSON.stringify({ ...vorige.data, vragen: undefined })}\n\n`
+    + `De gebruiker beantwoordde je vragen:\n${vorige.antwoorden.map((a, i) => `${i + 1}. ${a.vraag} → ${a.antwoord}`).join('\n')}\n\n`
+    + 'Pas de lezing aan met die antwoorden (ze gaan voor op je eerste gok) en geef de volledige JSON opnieuw in dezelfde vorm. '
+    + 'Stel alleen nog vragen over iets dat echt onduidelijk blijft en nog niet gevraagd is; anders "vragen": [].' : 'Lees deze schets.';
+  // 1. Tekst: eerst een korte analyse, dan de JSON.
+  let fout = null;
+  try {
+    const body = await schetsVraag(key, { model, max_tokens: 16000, system: SCHETS_PROMPT + SCHETS_VORM,
+      messages: [{ role: 'user', content: [beeld, { type: 'text', text: vraagTekst }] }] });
+    const text = (body.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('');
+    const data = schetsNormaal(schetsJsonUitTekst(text));
+    if (schetsHeeftKasten(data)) return schetsSchoon(data);
+    fout = body.stop_reason === 'max_tokens' ? 'Het antwoord was te lang (probeer één wand per foto).' : 'Geen kasten gevonden in het antwoord.';
+  } catch (err) {
+    if (/API-sleutel|tegoed|overbelast/.test(err.message)) throw err;
+    fout = err.message;
+  }
+  // 2. Nog eens, met het vaste formulier (tool).
+  const body = await schetsVraag(key, { model, max_tokens: 16000, system: SCHETS_PROMPT,
+    tools: [{ name: 'kasten', description: 'De kasten die op de schets staan, per wand.', input_schema: SCHETS_SCHEMA }],
+    tool_choice: { type: 'tool', name: 'kasten' },
+    messages: [{ role: 'user', content: [beeld, { type: 'text', text: `${vraagTekst} Geef de kasten met de tool "kasten".` }] }] });
   const tool = (body.content ?? []).find(c => c.type === 'tool_use' && c.name === 'kasten');
-  if (tool?.input) return tool.input;
-  // Terugval: JSON in de tekst.
-  const text = (body.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('');
-  const a = text.indexOf('{'), b = text.lastIndexOf('}');
-  if (a < 0 || b < a) throw new Error(body.stop_reason === 'max_tokens' ? 'Het antwoord was te lang; probeer één wand per foto.' : 'Het antwoord bevat geen kasten.');
-  return JSON.parse(text.slice(a, b + 1));
+  const data = schetsNormaal(tool?.input);
+  if (schetsHeeftKasten(data)) return schetsSchoon(data);
+  throw new Error(`${fout ?? ''} Ook een tweede poging gaf geen kasten.${body.stop_reason === 'max_tokens' ? ' Het antwoord was te lang: probeer één wand per foto.' : ''}`.trim());
 }
 
 // MARK: - Van gelezen schets naar kasten
+
+/** Breedte van een ronde kant buiten de kast (kwartrond: breedte of radius, halfrond: halve diepte, vrij: uitsteek). */
+const schetsRondB = (r, diepte) => !r ? 0 : r.vorm === 'vrij' ? Number(r.uitsteek) || 300
+  : r.vorm === 'half' || r.vorm === 'kop2' ? (Number(diepte) || 560) / 2 : Number(r.breedte) || Number(r.radius) || 300;
 
 const num0 = v => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
@@ -328,7 +460,8 @@ const num0 = v => (v === null || v === undefined || v === '' || !Number.isFinite
 function schetsPreset(it) {
   const eerst = it.vakken?.[0]?.type;
   if (it.soort === 'hang') return eerst === 'klep' ? 'boven-klep' : 'boven-deuren';
-  if (it.soort === 'kolom') return 'kolom';
+  if (it.soort === 'nis') return 'boognis';
+  if (it.soort === 'kolom' || it.soort === 'zuil') return 'kolom';
   if (it.spoelbak) return 'spoelbak';
   return it.greeploos ? 'onder-greeploos' : 'onder-greep';
 }
@@ -362,22 +495,24 @@ const schetsRondTekst = r => `${r.uitvoering === 'open' ? 'open ' : ''}${{ kwart
 function schetsVakTekst(it) {
   if (it.soort === 'leeg') return 'open ruimte (geen kast)';
   if (it.soort === 'paslat') return 'paslat';
+  if (it.soort === 'nis') return `boognis${it.boog?.top ? ` (top ${it.boog.top}` + (it.boog.links ? `, zijkanten ${it.boog.links}/${it.boog.rechts ?? it.boog.links}` : '') + ')' : ''}${it.staatOp ? ' · staat op de onderkasten' : ''}`;
+  if (it.soort === 'zuil') return `ronde zuil${it.rond?.vorm === 'vrij' ? ' (vrije vorm)' : ''}${it.rond?.uitvoering === 'open' ? ', open' : ''}${it.staatOp ? ' · staat op de onderkasten' : ''}`;
   return (it.vakken ?? []).map(v => v.type === 'lade' ? `${v.aantal ?? 1} lade${(v.aantal ?? 1) > 1 ? 's' : ''}` : v.type === 'toestel' ? (v.naam || 'toestel')
     : v.type === 'deur' ? `${v.deuren === 2 ? '2 deuren' : v.deuren === 1 ? '1 deur' : 'deur(en)'}` : v.type === 'klep' ? 'klep' : 'open vak')
     .map((t, i) => { const v = it.vakken[i]; return t + (v.kolomBreedtes?.length > 1 ? ` (${v.kolomBreedtes.join('|')})` : v.kolommen > 1 ? ` (in ${v.kolommen})` : ''); }).join(' / ')
-    + (it.rond ? ` · ${schetsRondTekst(it.rond)}` : '')
+    + (it.rond ? ` · ${schetsRondTekst(it.rond)}` : '') + (it.staatOp ? ' · staat op de onderkasten' : '')
     + (it.spoelbak ? ' · spoelbak' : '') + (it.greeploos ? ' · greeploos' : '') + (it.open ? ' · zonder fronten' : '')
     + (it.zijpaneelLinks ? ' · zijpaneel links' : '') + (it.zijpaneelRechts ? ' · zijpaneel rechts' : '');
 }
 
 /** Kasten maken in het project. opts: { plint, totVloer, bovenOnderkant } */
 function schetsMaakKasten(p, data, opts) {
-  const made = [], nieuweTypes = [];
+  const made = [], nieuweTypes = [], notes = [];
   let wandX = 0;
   for (const wand of data.wanden ?? []) {
     const items = (wand.kasten ?? []).filter(it => !it._weg);
-    const rijOnder = items.filter(it => it.rij !== 'boven' && it.soort !== 'hang');
-    const rijBoven = items.filter(it => it.rij === 'boven' || it.soort === 'hang');
+    const rijOnder = items.filter(it => it.rij !== 'boven' && it.soort !== 'hang' && !it.staatOp);
+    const rijBoven = items.filter(it => it.rij === 'boven' || it.soort === 'hang' || it.staatOp);
     // Onderrij: posities uit de breedtes na elkaar (de schets is niet op schaal); paslatten horen bij de buurkast.
     // Maten die maar één keer per rij op de schets staan, gelden voor de hele rij.
     const eerste = (pred, key) => num0(items.find(it => pred(it) && num0(it[key]) !== null)?.[key]);
@@ -386,6 +521,27 @@ function schetsMaakKasten(p, data, opts) {
       kolom: { hoogte: eerste(it => it.soort === 'kolom', 'hoogte'), diepte: eerste(it => it.soort === 'kolom' || it.soort === 'onder', 'diepte') },
       hang: { hoogte: eerste(it => it.soort === 'hang', 'hoogte'), diepte: eerste(it => it.soort === 'hang', 'diepte') },
     };
+    // Ontbrekende breedtes in de onderrij: de rest van de totaalmaat (min de ronde uiteinden) gelijk verdelen.
+    if (num0(wand.totaal)) {
+      const rij = rijOnder.filter(it => it.soort !== 'paslat' || num0(it.breedte));
+      const zonder = rij.filter(it => num0(it.breedte) === null && it.soort !== 'paslat');
+      if (zonder.length) {
+        const rondB = it => it.soort === 'zuil' || it.rond?.vorm === 'kop2' || !it.rond ? 0
+          : (it.rond.kant === 'beide' ? 2 : 1) * schetsRondB(it.rond, num0(it.diepte) ?? rijMaat[it.soort]?.diepte);
+        const vast = rij.reduce((t2, it) => t2 + (num0(it.breedte) ?? 0) + rondB(it), 0);
+        const elk = Math.round((num0(wand.totaal) - vast) / zonder.length / 10) * 10;
+        if (elk > 100) for (const it of zonder) { it.breedte = elk; it.onzeker = [it.onzeker, `breedte ${elk} = rest van de totaalmaat gelijk verdeeld`].filter(Boolean).join('; '); }
+      }
+    }
+    // Kasten op de onderkasten zonder breedte: de rest van de lengte gelijk verdelen.
+    if (num0(wand.totaal)) {
+      const op = rijBoven.filter(it => it.staatOp && !['leeg', 'paslat'].includes(it.soort));
+      const zonder = op.filter(it => num0(it.breedte) === null);
+      if (zonder.length) {
+        const elk = Math.round((num0(wand.totaal) - op.reduce((t2, it) => t2 + (num0(it.breedte) ?? 0), 0)) / zonder.length / 10) * 10;
+        if (elk > 100) for (const it of zonder) { it.breedte = elk; it.onzeker = [it.onzeker, `breedte ${elk} = rest van de lengte`].filter(Boolean).join('; '); }
+      }
+    }
     const placed = [];
     let x = 0, wandBreedte = 0;
     const plaats = (rij, boven) => {
@@ -399,6 +555,10 @@ function schetsMaakKasten(p, data, opts) {
           cx += w; continue;
         }
         if (it.soort === 'leeg') { cx += w; prev = null; continue; }
+        // Ronde kant links: die neemt plaats in de rij (de kast begint erna).
+        const rondLinks = it.soort !== 'zuil' && it.rond?.vorm !== 'kop2' && (it.rond?.kant === 'links' || it.rond?.kant === 'beide') ? schetsRondB(it.rond, num0(it.diepte) ?? rijMaat[it.soort]?.diepte) : 0;
+        const rondRechts = it.soort !== 'zuil' && it.rond?.vorm !== 'kop2' && (it.rond?.kant === 'rechts' || it.rond?.kant === 'beide') ? schetsRondB(it.rond, num0(it.diepte) ?? rijMaat[it.soort]?.diepte) : 0;
+        cx += rondLinks;
         const k = createCabinet(p, schetsPreset(it));
         const eigen = new Set(k.eigen ?? []);
         const secs = schetsSecties(it);
@@ -408,6 +568,27 @@ function schetsMaakKasten(p, data, opts) {
         if (it.greeploos) { k.greep = 'greeplijst'; eigen.add('greep'); }
         if (it.open) k.zonderFronten = true;
         if (it.zijpaneelLinks || it.zijpaneelRechts) k.zijpaneel = { links: !!it.zijpaneelLinks, rechts: !!it.zijpaneelRechts };
+        // Ronde zuil: een smalle kolomkast met aan beide kanten een ronde afwerking (halfrond: straal = halve diepte),
+        // zodat de buitenmaat de breedte van de zuil is.
+        if (it.soort === 'nis') {
+          const bg = it.boog ?? {};
+          // Op de onderkasten of een tablet: geen bodem nodig.
+          k.boog = { links: num0(bg.links), rechts: num0(bg.rechts), top: num0(bg.top), piek: num0(bg.piek) ?? 35, bodem: !it.staatOp };
+          k.secties = [sec('open', { legplanken: 0 })];
+          // Even diep als de kast ernaast.
+          if (num0(it.diepte) === null && prev) it.diepte = Number(prev.k.diepte) || null;
+        }
+        if (it.soort === 'zuil') {
+          const r = it.rond ?? {};
+          const vorm = r.vorm === 'vrij' ? 'vrij' : 'half';
+          const dz = num0(it.diepte) ?? Math.min(w || 600, 600);
+          it.rond = { kant: 'beide', vorm, uitvoering: r.uitvoering === 'open' ? 'open' : 'dicht', legplanken: num0(r.legplanken), vrijVorm: r.vrijVorm, uitsteek: num0(r.uitsteek) ?? (vorm === 'vrij' ? Math.round((w || 600) / 3) : null) };
+          it.diepte = dz;
+          it._kastBreedte = Math.max(150, (w || 600) - (vorm === 'half' ? dz : 2 * (it.rond.uitsteek || 0)));
+          if (!(it.vakken ?? []).length) it.vakken = [{ type: 'open', legplanken: it.rond.uitvoering === 'open' ? 0 : 3 }];
+          k.secties = schetsSecties(it);
+          if (it.rond.uitvoering !== 'open') k.zonderFronten = !it.vakken.some(v => v.type === 'deur' || v.type === 'lade');
+        }
         if (it.rond?.kant && it.rond?.vorm) {
           const r = it.rond;
           // Eilandkop zonder kasten rug aan rug: halfrond over de diepte van deze kast.
@@ -416,17 +597,18 @@ function schetsMaakKasten(p, data, opts) {
             legplanken: num0(r.legplanken), vrijVorm: vorm === 'vrij' ? (VRIJE_VORMEN[r.vrijVorm] ? r.vrijVorm : 'ellips') : undefined, uitsteek: num0(r.uitsteek) };
         }
         if (pendingLinks) { k.paslat = { ...(k.paslat ?? {}), links: pendingLinks }; pendingLinks = 0; }
-        if (w) k.breedte = w;
+        if (w) k.breedte = it._kastBreedte ?? w;
+        if (it.staatOp) { k.plint = 'geen'; eigen.add('plint'); }
         const isOnderOfKolom = it.soort !== 'hang';
         if (isOnderOfKolom && opts.plint != null) { k.plintHoogte = opts.plint; eigen.add('plintHoogte'); }
-        const rm = rijMaat[it.soort] ?? {};
+        const rm = it.staatOp ? {} : rijMaat[it.soort] ?? {};
         let h = num0(it.hoogte) ?? rm.hoogte;
         if (h && isOnderOfKolom && opts.totVloer && k.plint !== 'geen') h -= Number(k.plintHoogte) || 0;
         if (h) { k.hoogte = h; eigen.add('hoogte'); }
         const d = num0(it.diepte) ?? rm.diepte;
         if (d) { k.diepte = d; eigen.add('diepte'); }
         // Nog altijd leeg (niet op de schets, geen projectstandaard): gangbare maten.
-        const def = SCHETS_STANDAARD[it.soort] ?? SCHETS_STANDAARD.onder;
+        const def = SCHETS_STANDAARD[it.soort === 'zuil' || it.soort === 'nis' ? 'kolom' : it.soort] ?? SCHETS_STANDAARD.onder;
         if (!(Number(k.hoogte) > 0)) k.hoogte = def.hoogte;
         if (!(Number(k.diepte) > 0)) k.diepte = def.diepte;
         if (!(Number(k.breedte) > 0)) k.breedte = 600;
@@ -452,10 +634,11 @@ function schetsMaakKasten(p, data, opts) {
         k.notitie = it.tekst ? `Schets: ${it.tekst}` : undefined;
         if (it.nieuwType && it._bewaar !== false) nieuweTypes.push({ naam: it.nieuwType, k });
         p.kasten.push(k);
-        placed.push({ k, it, x: cx, boven });
+        const rondL = it.soort === 'zuil' ? (it.rond.vorm === 'half' ? Number(k.diepte) / 2 : Number(it.rond.uitsteek) || 0) : 0;
+        placed.push({ k, it, x: cx + rondL, boven });
         made.push(k);
         prev = { k };
-        cx += w;
+        cx += w + rondRechts;
       }
       return cx;
     };
@@ -472,12 +655,37 @@ function schetsMaakKasten(p, data, opts) {
     }
     const Zb = achter.length ? Math.max(...achter.map(q => Number(q.k.diepte) || 0)) : 0;
     // Hoogte van de hangkasten: opgegeven onderkant, anders boven gelijk met een kolomkast op deze wand, anders projectstandaard.
-    const kolom = placed.find(q => q.it.soort === 'kolom');
+    // Kasten op de onderkasten: niet dieper dan het rechte stuk dat boven een ronde hoek (kwartrond) overblijft,
+    // zodat ze niet over de boog uitsteken: diepte onderkast − radius (de fronten liggen dan gelijk met het begin van de boog).
+    const rondOnder = placed.filter(q => !q.boven && !achter.includes(q) && q.it.rond && (q.it.rond.vorm === 'kwart' || q.it.rond.vorm === 'vrij'));
+    if (rondOnder.length) {
+      const maxD = Math.min(...rondOnder.map(q => Number(q.k.diepte) - (q.it.rond.vorm === 'vrij' ? Number(q.it.rond.uitsteek) || 300 : Number(q.it.rond.radius) || 300)));
+      for (const q of placed.filter(q2 => q2.boven && q2.it.staatOp)) {
+        if (maxD > 100 && Number(q.k.diepte) > maxD) {
+          q.k.diepte = Math.round(maxD);
+          q.k.eigen = [...new Set([...(q.k.eigen ?? []), 'diepte'])];
+          notes.push(`${q.k.code}: ${Math.round(maxD)} diep (diepte onderkast min de radius van de ronde hoek eronder), zodat ze niet over de boog uitsteekt.`);
+        }
+      }
+    }
+    const kolom = placed.find(q => q.it.soort === 'kolom' && !q.it.staatOp);
+    // Tablet (werkblad) op de onderrij: een werkblad over de onderkasten; kasten die erop staan komen er bovenop.
+    const tabletDikte = wand.werkblad ? (num0(wand.werkblad.dikte) ?? 38) : 0;
+    if (wand.werkblad) {
+      const ids = placed.filter(q => !q.boven && !achter.includes(q) && q.it.soort !== 'kolom').map(q => q.k.id);
+      if (ids.length) p.werkbladen = [...(p.werkbladen ?? []), { id: uid(), naam: `Tablet ${wand.naam || ''}`.trim(), kasten: ids, materiaal: 'plaat', dikte: tabletDikte,
+        voor: num0(wand.werkblad.overstek) ?? 20, links: 0, rechts: 0, uitsparingen: [] }];
+    }
     for (const q of placed) {
       const k = q.k;
       const plint = k.plint === 'geen' ? 0 : Number(k.plintHoogte) || 0;
       let y = plint;
-      if (q.boven) {
+      if (q.boven && q.it.staatOp) {
+        // Staat op de onderkasten: op de bovenkant van de onderkast eronder (of de hoogste van de onderrij).
+        const onder = placed.filter(o => !o.boven && o.x < q.x + Number(k.breedte) - 1 && o.x + Number(o.k.breedte) > q.x + 1);
+        const bron = onder.length ? onder : placed.filter(o => !o.boven);
+        y = (bron.length ? Math.max(...bron.map(o => (o.k.plint === 'geen' ? 0 : Number(o.k.plintHoogte) || 0) + Number(o.k.hoogte))) : 0) + tabletDikte;
+      } else if (q.boven) {
         if (opts.bovenOnderkant) y = opts.bovenOnderkant;
         else if (kolom) y = (kolom.k.plint === 'geen' ? 0 : Number(kolom.k.plintHoogte) || 0) + Number(kolom.k.hoogte) - Number(k.hoogte);
         else y = Number(p.bovenHoogte) || 1400;
@@ -496,13 +704,38 @@ function schetsMaakKasten(p, data, opts) {
   }
   if (nieuweTypes.length) Store.save();
   made.nieuweTypes = nieuweTypes.map(x => x.naam);
+  made.notes = notes;
   return made;
 }
 
 // MARK: - Venster
 
 function openSketchImport(p, onDone) {
-  const st = { fase: 'foto', foto: null, data: null, fout: null, bezig: false };
+  const st = { fase: 'foto', foto: null, data: null, fout: null, bezig: false, ronde: 0, antwoorden: {} };
+  // Na het lezen: de optelling nakijken (opmerking als de breedtes niet optellen tot de totaalmaat).
+  const nakijken = () => {
+    for (const w of st.data.wanden ?? []) if (w.totaal) {
+      const rondB = it => !it.rond ? 0 : (it.rond.kant === 'beide' ? 2 : 1) * (it.rond.vorm === 'vrij' ? Number(it.rond.uitsteek) || 300
+        : it.rond.vorm === 'half' || it.rond.vorm === 'kop2' ? (Number(it.diepte) || 560) / 2 : Number(it.rond.breedte) || Number(it.rond.radius) || 300);
+      const rij = (w.kasten ?? []).filter(it => it.rij !== 'boven' && it.soort !== 'hang' && !it.staatOp);
+      if (rij.some(it => num0(it.breedte) === null && it.soort !== 'paslat')) continue;    // ontbrekende breedtes worden verdeeld
+      const som = rij.reduce((t, it) => t + (Number(it.breedte) || 0) + rondB(it), 0);
+      if (Math.abs(som - w.totaal) > 1) st.data.opmerkingen.push(`${w.naam || 'Wand'}: de breedtes van de onderrij tellen op tot ${som}, de totaalmaat is ${w.totaal}. Kijk de breedtes na.`);
+    }
+  };
+  // Lezen (of opnieuw lezen met de antwoorden) en daarna vragen of de controlelijst tonen.
+  const lees = async (vorige) => {
+    const key = schetsGet(SCHETS_KEY), model = schetsGet(SCHETS_MODEL) || 'claude-sonnet-5-5';
+    st.bezig = true; st.fout = null; render();
+    try {
+      st.data = await schetsLezen(st.foto.base64, key, model, vorige);
+      if (!st.data.wanden?.some(w => w.kasten?.length)) throw new Error('Er werden geen kasten herkend. Neem de foto recht van boven met goed licht.');
+      nakijken();
+      st.ronde += 1; st.antwoorden = {};
+      st.fase = st.data.vragen.length && st.ronde <= 2 ? 'vragen' : 'controle';
+    } catch (err) { st.fout = `Lezen lukte niet: ${err.message}`; if (vorige) st.fase = 'vragen'; }
+    st.bezig = false; render();
+  };
   const body = el(`<div class="content" id="sk"></div>`);
   const sheet = openSheet({ title: 'Schets inlezen', left: { label: 'Annuleer' }, body, wide: true });
   const render = () => {
@@ -538,40 +771,61 @@ function openSketchImport(p, onDone) {
         const k2 = $('#sk-key', body).value.trim();
         if (!k2) { st.fout = 'Vul eerst je API-sleutel in.'; render(); return; }
         schetsSet(SCHETS_KEY, k2);
-        st.bezig = true; st.fout = null; render();
-        try {
-          st.data = await schetsLezen(st.foto.base64, k2, $('#sk-model', body)?.value || model);
-          for (const w of st.data.wanden ?? []) if (w.totaal) {
-            const som = (w.kasten ?? []).filter(it => it.rij !== 'boven' && it.soort !== 'hang').reduce((t, it) => t + (Number(it.breedte) || 0), 0);
-            if (Math.abs(som - w.totaal) > 1) (st.data.opmerkingen ??= []).push(`${w.naam || 'Wand'}: de breedtes van de onderrij tellen op tot ${som}, de totaalmaat is ${w.totaal}. Kijk de breedtes na.`);
-          }
-          if (!st.data.wanden?.some(w => w.kasten?.length)) throw new Error('Er werden geen kasten herkend. Neem de foto recht van boven met goed licht.');
-          st.fase = 'controle';
-        } catch (err) { st.fout = `Lezen lukte niet: ${err.message}`; }
-        st.bezig = false; render();
+        schetsSet(SCHETS_MODEL, $('#sk-model', body)?.value || model);
+        st.ronde = 0;
+        await lees(null);
+      });
+      return;
+    }
+    if (st.fase === 'vragen') {
+      // Vragen van Claude: per vraag de keuzes als knoppen, of zelf een antwoord typen.
+      const d0 = st.data;
+      body.innerHTML = `
+        ${st.foto ? `<details class="group"><summary class="group-header" style="cursor:pointer">Foto bekijken</summary><div class="group-body" style="padding:8px"><img src="${st.foto.dataUrl}" style="max-width:100%;border-radius:8px"></div></details>` : ''}
+        <div class="group"><div class="group-body"><div class="row"><span class="row-sub">Om het zo juist mogelijk te maken heb ik nog ${d0.vragen.length === 1 ? 'een vraag' : `${d0.vragen.length} vragen`}. Kies een antwoord of typ zelf iets; een vraag zonder antwoord blijft mijn beste gok.</span></div></div></div>
+        ${d0.vragen.map((q, i) => `<div class="group"><div class="group-header" style="text-transform:none">${i + 1}. ${esc(q.vraag)}</div><div class="group-body">
+          ${q.opties.map((o, j) => `<button class="row link" type="button" data-q="${i}" data-o="${j}" style="${st.antwoorden[i] === o ? 'font-weight:600' : ''}"><span>${st.antwoorden[i] === o ? '● ' : '○ '}${esc(o)}</span></button>`).join('')}
+          <div class="row"><div class="row-fill"><input class="input-plain" id="sk-qa-${i}" placeholder="Zelf antwoorden…" value="${esc(q.opties.includes(st.antwoorden[i]) ? '' : st.antwoorden[i] ?? '')}"></div></div>
+        </div>${q.waarom ? `<div class="group-footer">${esc(q.waarom)}</div>` : ''}</div>`).join('')}
+        ${st.fout ? `<div class="group"><div class="group-body"><div class="row"><span class="row-sub" style="color:var(--red, #c00)">${esc(st.fout)}</span></div></div></div>` : ''}
+        <div class="group"><div class="group-body">
+          <button class="row button" type="button" id="sk-antw" ${st.bezig ? 'disabled' : ''}>${st.bezig ? 'Bezig met verwerken… (even geduld)' : 'Antwoorden verwerken'}</button>
+          <button class="row link" type="button" id="sk-skip"><span>Overslaan, naar de lijst</span><span class="chev">${icon('right')}</span></button>
+        </div></div>`;
+      $$('[data-q]', body).forEach(b => b.addEventListener('click', () => { st.antwoorden[Number(b.dataset.q)] = d0.vragen[Number(b.dataset.q)].opties[Number(b.dataset.o)]; render(); }));
+      d0.vragen.forEach((q, i) => $(`#sk-qa-${i}`, body).addEventListener('input', e => { if (e.target.value.trim()) st.antwoorden[i] = e.target.value.trim(); else delete st.antwoorden[i]; }));
+      $('#sk-skip', body).addEventListener('click', () => { st.fase = 'controle'; render(); });
+      $('#sk-antw', body).addEventListener('click', async () => {
+        const antwoorden = d0.vragen.map((q, i) => ({ vraag: q.vraag, antwoord: st.antwoorden[i] })).filter(a => a.antwoord);
+        if (!antwoorden.length) { st.fase = 'controle'; render(); return; }
+        await lees({ data: d0, antwoorden });
       });
       return;
     }
     // Controle: lijst per wand, aanpasbaar.
     const d = st.data;
-    const soorten = [['onder', 'Onderkast'], ['kolom', 'Kolomkast'], ['hang', 'Hangkast'], ['leeg', 'Open ruimte'], ['paslat', 'Paslat']];
+    const soorten = [['onder', 'Onderkast'], ['kolom', 'Kolomkast'], ['hang', 'Hangkast'], ['nis', 'Boognis'], ['zuil', 'Ronde zuil'], ['leeg', 'Open ruimte'], ['paslat', 'Paslat']];
     const rondOpts = [['', 'Geen ronde kant'], ...['kwart', 'half', 'kop2', 'vrij'].flatMap(v => ['links', 'rechts', 'beide'].map(kt => [`${v}-${kt}`, `${{ kwart: 'Kwartrond', half: 'Halfrond', kop2: 'Eilandkop', vrij: 'Vrije vorm' }[v]} ${kt}`]))];
+    // Maatveld met een korte letter ervoor (B breedte, H hoogte, D diepte, R radius).
+    const skNum = (letter, id, val, ph) => `<label style="display:inline-flex;align-items:center;gap:4px"><span class="row-sub" style="min-width:12px">${letter}</span><input class="input-num" id="${id}" type="number" placeholder="${ph}" value="${val ?? ''}" style="width:78px"></label>`;
     const lijsten = w => [...(w.kasten ?? []), ...(w.eiland ? w.achterzijde ?? [] : [])];
     const totaal = (d.wanden ?? []).reduce((t, w) => t + lijsten(w).filter(it => !it._weg && !['leeg', 'paslat'].includes(it.soort)).length, 0);
     body.innerHTML = `
       ${st.foto ? `<details class="group"><summary class="group-header" style="cursor:pointer">Foto bekijken</summary><div class="group-body" style="padding:8px"><img src="${st.foto.dataUrl}" style="max-width:100%;border-radius:8px"></div></details>` : ''}
-      ${(d.wanden ?? []).map((w, wi) => [['kasten', w.eiland ? `${w.naam || `Wand ${wi + 1}`} · eiland, voorkant` : (w.naam || `Wand ${wi + 1}`)], ...(w.eiland && w.achterzijde?.length ? [['achterzijde', `${w.naam || `Wand ${wi + 1}`} · eiland, achterzijde (rug aan rug)`]] : [])].map(([lijst, titel]) => `<div class="group"><div class="group-header">${esc(titel)}</div><div class="group-body">
+      ${(d.wanden ?? []).map((w, wi) => [['kasten', (w.eiland ? `${w.naam || `Wand ${wi + 1}`} · eiland, voorkant` : (w.naam || `Wand ${wi + 1}`)) + (w.werkblad ? ` · met tablet ${w.werkblad.dikte ?? 38} mm` : '')], ...(w.eiland && w.achterzijde?.length ? [['achterzijde', `${w.naam || `Wand ${wi + 1}`} · eiland, achterzijde (rug aan rug)`]] : [])].map(([lijst, titel]) => `<div class="group"><div class="group-header">${esc(titel)}</div><div class="group-body">
+        ${lijst === 'kasten' ? `<div class="row" style="gap:8px"><span class="row-label">Tablet (werkblad) op de onderkasten</span>${w.werkblad ? skNum('dikte', `sk-wbd-${wi}`, w.werkblad.dikte, '38') : ''}${toggleHTML(`sk-wb-${wi}`, !!w.werkblad)}</div>` : ''}
         ${(w[lijst] ?? []).map((it, ii) => it._weg ? '' : `<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center">
           <span class="row-label" style="min-width:150px">${esc(it.tekst || '—')}<br><span class="row-sub">${esc(schetsVakTekst(it))}</span>
             ${it.onzeker ? `<br><span class="row-sub" style="color:var(--orange, #c60)">${icon('warning')} ${esc(it.onzeker)}</span>` : ''}</span>
           <div class="row-fill" style="gap:6px;flex-wrap:wrap">
             ${selectHTML(`sk-s-${wi}-${lijst}-${ii}`, soorten, it.soort)}
-            <input class="input-num" id="sk-b-${wi}-${lijst}-${ii}" type="number" placeholder="breedte" value="${it.breedte ?? ''}" style="width:80px">
-            ${['leeg', 'paslat'].includes(it.soort) ? '' : `<input class="input-num" id="sk-h-${wi}-${lijst}-${ii}" type="number" placeholder="hoogte" value="${it.hoogte ?? ''}" style="width:80px">
-            <input class="input-num" id="sk-d-${wi}-${lijst}-${ii}" type="number" placeholder="diepte" value="${it.diepte ?? ''}" style="width:80px">
+            ${skNum('B', `sk-b-${wi}-${lijst}-${ii}`, it.breedte, 'breedte')}
+            ${['leeg', 'paslat'].includes(it.soort) ? '' : `${skNum('H', `sk-h-${wi}-${lijst}-${ii}`, it.hoogte, 'hoogte')}
+            ${skNum('D', `sk-d-${wi}-${lijst}-${ii}`, it.diepte, 'diepte')}
             ${selectHTML(`sk-r-${wi}-${lijst}-${ii}`, rondOpts, it.rond ? `${it.rond.vorm}-${it.rond.kant}` : '')}
-            ${it.rond && it.rond.vorm !== 'vrij' ? `<input class="input-num" id="sk-rr-${wi}-${lijst}-${ii}" type="number" placeholder="radius" value="${it.rond.radius ?? ''}" style="width:72px">` : ''}`}
+            ${it.rond && it.rond.vorm !== 'vrij' ? skNum('R', `sk-rr-${wi}-${lijst}-${ii}`, it.rond.radius, 'radius') : ''}`}
             <button class="mini danger" type="button" data-weg="${wi}-${lijst}-${ii}" aria-label="Weglaten">${icon('trash')}</button>
+            ${it.rij === 'boven' || it.staatOp ? `<label class="row-sub" style="display:flex;align-items:center;gap:6px;width:100%">${toggleHTML(`sk-op-${wi}-${lijst}-${ii}`, !!it.staatOp)} Staat op de onderkasten</label>` : ''}
             ${it.nieuwType ? `<label class="row-sub" style="display:flex;align-items:center;gap:6px;width:100%">${toggleHTML(`sk-nt-${wi}-${lijst}-${ii}`, it._bewaar !== false)} Bewaren als eigen kasttype "${esc(it.nieuwType)}"</label>` : ''}
           </div></div>`).join('')}
       </div></div>`).join('')).join('')}
@@ -596,7 +850,12 @@ function openSketchImport(p, onDone) {
       });
       $(`#sk-rr-${id}`, body)?.addEventListener('change', e => { it.rond = { ...it.rond, radius: num0(e.target.value) }; });
       $(`#sk-nt-${id}`, body)?.addEventListener('change', e => { it._bewaar = e.target.checked; });
+      $(`#sk-op-${id}`, body)?.addEventListener('change', e => { it.staatOp = e.target.checked; });
     })));
+    (d.wanden ?? []).forEach((w, wi) => {
+      $(`#sk-wb-${wi}`, body)?.addEventListener('change', e => { w.werkblad = e.target.checked ? { dikte: 38, overstek: 20, ...(w.werkblad ?? {}) } : null; render(); });
+      $(`#sk-wbd-${wi}`, body)?.addEventListener('change', e => { w.werkblad = { ...(w.werkblad ?? {}), dikte: num0(e.target.value) }; });
+    });
     $$('[data-weg]', body).forEach(b => b.addEventListener('click', () => { const [wi, lijst, ii] = b.dataset.weg.split('-'); d.wanden[Number(wi)][lijst][Number(ii)]._weg = true; render(); }));
     $('#sk-plint', body).addEventListener('change', e => { d.plintHoogte = num0(e.target.value); });
     $('#sk-vloer', body).addEventListener('change', e => { d.hoogteTotVloer = e.target.checked; });
