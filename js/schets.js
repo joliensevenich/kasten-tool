@@ -609,7 +609,7 @@ function schetsMaakKasten(p, data, opts) {
         const deur = (it.vakken ?? []).find(v => v.type === 'deur' && v.deuren);
         if (deur) { k.deuren = String(deur.deuren); }
         if (it.greeploos) { k.greep = 'greeplijst'; eigen.add('greep'); }
-        if (it.open) k.zonderFronten = true;
+        if (it.open && it.soort !== 'nis') k.zonderFronten = true;   // een boognis is altijd open, maar heeft een frontplaat
         if (it.zijpaneelLinks || it.zijpaneelRechts) k.zijpaneel = { links: !!it.zijpaneelLinks, rechts: !!it.zijpaneelRechts };
         // Ronde zuil: een smalle kolomkast met aan beide kanten een ronde afwerking (halfrond: straal = halve diepte),
         // zodat de buitenmaat de breedte van de zuil is.
@@ -771,8 +771,9 @@ function openSketchImport(p, onDone) {
     const key = schetsGet(SCHETS_KEY), model = schetsGet(SCHETS_MODEL) || 'claude-sonnet-5-5';
     st.bezig = true; st.fout = null; render();
     try {
-      st.data = await schetsLezen(st.foto.base64, key, model, vorige);
-      if (!st.data.wanden?.some(w => w.kasten?.length)) throw new Error('Er werden geen kasten herkend. Neem de foto recht van boven met goed licht.');
+      st.data = schetsVorm(await schetsLezen(st.foto.base64, key, model, vorige));
+      if (!schetsHeeftKasten(st.data)) throw new Error('Er werden geen kasten herkend. Neem de foto recht van boven met goed licht.');
+      schetsSchoon(st.data);
       nakijken();
       st.ronde += 1; st.antwoorden = {};
       st.fase = st.data.vragen.length && st.ronde <= 2 ? 'vragen' : 'controle';

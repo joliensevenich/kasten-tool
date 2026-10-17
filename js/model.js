@@ -82,6 +82,7 @@ const DEFAULT_SETTINGS = {
   legplankDikGrens: 700,     // losse en vaste legplanken langer dan dit worden legplankDik dik (tegen doorhangen)
   legplankDik: 25,
   paslatDiepte: 100,         // kastpaslat achter de frontpaslat
+  boogStaanderAfstand: 300,  // boognis: staanders boven de boog om de
   zijpaneelNaastFront: 14,   // zijpaneel gelijk met het front (front erachter): max. dikte, anders gaat de deur niet open (155°-scharnier)
   paslatSchroefAfstand: 300,
   trespaDikte: 10,          // Trespa-strook onder de plint
@@ -1644,6 +1645,32 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       }
     });
 
+    // Staanders boven de boog (tussen de voorste en de achterste rib): om de boogStaanderAfstand over de breedte, van het
+    // buigtriplex tot tegen de top, met twee deuvels in de top; het buigtriplex wordt erop gelijmd en geniet.
+    const coAt = x => { for (let i = 1; i < Co.length; i++) if (Co[i][0] >= x) { const [x0, y0] = Co[i - 1], [x1, y1] = Co[i]; return x1 === x0 ? y1 : y0 + (y1 - y0) * (x - x0) / (x1 - x0); } return Co[Co.length - 1][1]; };
+    const zS0 = zR0 + t, zS1 = zR1 - t;
+    const topPart = parts.find(q => q.id === 'top');
+    if (zS1 - zS0 >= 40) {
+      const afst = S.boogStaanderAfstand || 300;
+      const n = Math.max(1, Math.ceil(binnenB / afst) - 1);
+      let nr = 0;
+      for (let i = 1; i <= n; i++) {
+        const xs = xi0 + i * binnenB / (n + 1) - t / 2;
+        const yS = Math.max(coAt(xs), coAt(xs + t));
+        if (yTop - yS < 40) continue;
+        nr++;
+        const st = add({ id: `boogstaander-${nr}`, naam: `Staander boven de boog ${nr}`, rol: 'rondrib', mat: 'korpus', dikte: t, grain: 'v', edges: {},
+          box: { x: xs, y: yS, z: zS0, w: t, h: yTop - yS, d: zS1 - zS0 }, uLen: zS1 - zS0, vLen: yTop - yS });
+        if (topPart) for (const dz2 of [0.25, 0.75]) {
+          const zc = zS0 + (zS1 - zS0) * dz2;
+          st.ops.push({ kind: 'boring', edge: 'v1', pos: (zS1 - zS0) * dz2, dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
+          topPart.ops.push({ kind: 'boring', face: 'onder', u: xs + t / 2 - topPart.box.x, v: zc - topPart.box.z, dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
+          count(`Deuvel ${S.deuvelDia} × ${S.deuvelLengte}`);
+        }
+      }
+      if (nr) warnings.push(`Boognis: ${nr} staanders boven de boog (om de ${afst} mm) tussen de boogribben; het buigtriplex erop lijmen en nieten.`);
+    }
+
     // Buigtriplex (lagen) en HPL langs de boog, over de hele diepte (achter de frontplaat tot de rug).
     const dz = zR1 - zR0;
     const band = (e0, e1) => { const A2 = off(e0), B2 = off(e1); return [...A2, ...B2.reverse()]; };
@@ -1790,12 +1817,17 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
   // (rondTriplexLagen × rondTriplexDikte) in komt; tussenribben en opstaanders; HPL over alles. Clamex met deuvels.
   // Open: ronde bodem, top en legplanken met Clamex en deuvels. Plint (met Trespa) en werkblad rond mee.
   // Ronde kant links, rechts of aan beide kanten (dan dezelfde instellingen aan elke kant).
+  const zBackKast = zBack;
   const rondKanten = k.rond?.kant === 'beide' ? ['links', 'rechts'] : [k.rond?.kant];
   for (const rd of rondKanten.filter(x => x === 'links' || x === 'rechts').map(kant => ({ ...k.rond, kant }))) {
     const left = rd.kant === 'links';
     const sd = left ? sideL : sideR;
     const X = xl => (left ? xl : W - xl);                  // xl ≤ 0: naar buiten vanaf het buitenvlak van de zijwand
-    const zf = k.front === 'inliggend' || zonderFronten ? D : D + fd;   // voorvlak (fronten; zonder fronten: het korpus)
+    // Voorvlak: de fronten (zonder fronten: het korpus; boognis: altijd de frontplaat). Achterkant: de achterkant van de
+    // rug (bij een opgeschroefde rug zit die achter de zijwanden), zodat de ronde kant vooraan en achteraan gelijk komt.
+    const zf = k.boog || !(k.front === 'inliggend' || zonderFronten) ? D + fd : D;
+    const zBackK = zBackKast;                                 // achterkant van de zijwanden (voor verbindingen in de zijwand)
+    const zBack = 0;                                          // achterkant van de ronde kant = achterkant van de rug
     const kop2 = rd.vorm === 'kop2';
     const vrij = rd.vorm === 'vrij';                          // vrije (organische) vorm, van voor tot achter terug naar de kast
     const half = rd.vorm === 'half' || kop2 || vrij;          // aan twee kanten rond (voor en achter)
@@ -1865,7 +1897,7 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
     };
     // Liggend deel (plaat of rib) tegen het buitenvlak van de zijwand: Clamex en deuvels langs de rechte kant (xl = 0).
     const toSide = (hp2, y, zA, zE, dowels = true) => {
-      const za = Math.max(zA, zBack), zb = Math.min(zE, zBack + sd.uLen);
+      const za = Math.max(zA, zBackK), zb = Math.min(zE, zBackK + sd.uLen);
       if (zb - za < 40) return [];
       const zs = clamexPositions(zb - za, S).map(c => za + c);
       for (const z of zs) join2(hp2, left ? 'u1' : 'u0', z - hp2.box.z, za - hp2.box.z, zb - hp2.box.z, sd, 'buiten', sideU(z), sideV(y + t / 2), [1, 0], dowels);
@@ -1949,11 +1981,11 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
         sideZs = toSide(pl, y, half ? zBS : zBack, zFS, false);
         if (kop2) {
           // Ook vast aan de zijwand van de kast erachter: Clamex in de kant van de plaat hier, in die zijwand via 'extern'.
-          const za = Math.max(zBS, zBack - sd.uLen), zb = zBack;
+          const za = Math.max(zBS, zBackK - sd.uLen), zb = zBackK;
           if (zb - za > 40) for (const c of clamexPositions(zb - za, S)) {
             const z = za + c;
             pl.ops.push({ kind: 'clamex', edge: left ? 'u1' : 'u0', pos: z - pl.box.z, naam: 'Clamex' });
-            extern.push({ kind: 'clamex', kant: rd.kant, achter: zBack - z, y: y + t / 2 });
+            extern.push({ kind: 'clamex', kant: rd.kant, achter: zBackK - z, y: y + t / 2 });
             sideZs.push(z);
           }
           sideZs.sort((a, b) => a - b);
