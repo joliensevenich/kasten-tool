@@ -355,7 +355,9 @@ function openSketchImport(p, onDone) {
           ${row('Model', selectHTML('sk-model', [['claude-sonnet-5-5', 'Sonnet (snel, goedkoop)'], ['claude-opus-5-5', 'Opus (leest moeilijk handschrift beter)']], model))}
         </div><div class="group-footer">De sleutel maak je op console.anthropic.com (API keys). Ze blijft alleen op dit toestel. De foto gaat naar Anthropic om gelezen te worden; dat kost enkele eurocent per foto.</div></div>
         <div class="group"><div class="group-body">
-          <label class="row button" for="sk-file"><span class="icon-label">${icon('upload')}Foto nemen of kiezen</span></label>
+          <label class="row button" for="sk-cam"><span class="icon-label">${icon('eye')}Foto nemen (camera)</span></label>
+          <input type="file" id="sk-cam" accept="image/*" capture="environment" style="display:none">
+          <label class="row button" for="sk-file"><span class="icon-label">${icon('upload')}Foto kiezen (foto's of bestanden)</span></label>
           <input type="file" id="sk-file" accept="image/*" style="display:none">
         </div></div>
         ${st.foto ? `<div class="group"><div class="group-body" style="padding:8px"><img src="${st.foto.dataUrl}" style="max-width:100%;border-radius:8px"></div></div>
@@ -364,7 +366,7 @@ function openSketchImport(p, onDone) {
       $('#sk-vb', body).addEventListener('click', () => { const d = schetsVoorbeeldPdf(); shareFile(d.blob, d.name); });
       $('#sk-key', body).addEventListener('change', e => schetsSet(SCHETS_KEY, e.target.value.trim()));
       $('#sk-model', body).addEventListener('change', e => schetsSet(SCHETS_MODEL, e.target.value));
-      $('#sk-file', body).addEventListener('change', async e => {
+      for (const id of ['#sk-cam', '#sk-file']) $(id, body).addEventListener('change', async e => {
         const f = e.target.files?.[0];
         if (!f) return;
         try { st.foto = await schetsImage(f); st.fout = null; } catch (err) { st.fout = err.message; }
