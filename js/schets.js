@@ -373,15 +373,46 @@ function schetsNormaal(x) {
   if (x && typeof x === 'object') return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, schetsNormaal(v)]));
   return x;
 }
-/** JSON uit een tekstantwoord: het ```json-blok, anders van de eerste { tot de laatste }. */
+/** JSON herstellen: commentaar, komma's voor } of ], typografische aanhalingstekens, en een afgebroken einde afsluiten. */
+function schetsJsonHerstel(t) {
+  let x = t.replace(/[\u201C\u201D\u201E]/g, '"').replace(/[\u2018\u2019]/g, "'")
+    .replace(/\/\/[^\n"]*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/,\s*([}\]])/g, '$1');
+  // Afgebroken (te lang antwoord): open strings, objecten en lijsten sluiten.
+  const stack = []; let inStr = false, esc = false;
+  for (const ch of x) {
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true; else if (ch === '{' || ch === '[') stack.push(ch); else if (ch === '}' || ch === ']') stack.pop();
+  }
+  if (inStr) x += '"';
+  x = x.replace(/,\s*$/, '');
+  while (stack.length) x += stack.pop() === '{' ? '}' : ']';
+  return x.replace(/,\s*([}\]])/g, '$1');
+}
+/** JSON uit een tekstantwoord: het ```json-blok, anders van de eerste { tot de laatste }; zo nodig hersteld. */
 function schetsJsonUitTekst(text) {
   const blok = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const kand = [blok?.[1], (() => { const a = text.indexOf('{', text.indexOf('</analyse>') + 1), b = text.lastIndexOf('}'); return a >= 0 && b > a ? text.slice(a, b + 1) : null; })(),
     (() => { const a = text.indexOf('{'), b = text.lastIndexOf('}'); return a >= 0 && b > a ? text.slice(a, b + 1) : null; })()].filter(Boolean);
+  // Een antwoord dat een lijst is ([...]).
+  { const a = text.indexOf('['), b = text.lastIndexOf(']'); if (a >= 0 && b > a && (text.indexOf('{') < 0 || a < text.indexOf('{'))) kand.unshift(text.slice(a, b + 1)); }
+  // Ook een open ```json-blok zonder sluiting (afgebroken antwoord).
+  const open = text.match(/```(?:json)?\s*([\s\S]*)$/i)?.[1];
+  if (open) kand.push(open);
   for (const k of kand) { try { return JSON.parse(k); } catch { /* volgende */ } }
+  for (const k of kand) { try { return JSON.parse(schetsJsonHerstel(k)); } catch { /* volgende */ } }
   return null;
 }
 const schetsHeeftKasten = d => Array.isArray(d?.wanden) && d.wanden.some(w => Array.isArray(w?.kasten) && w.kasten.length);
+/** Andere vormen van het antwoord omzetten naar { wanden: [...] } (een lijst kasten, een lijst wanden, één wand). */
+function schetsVorm(d) {
+  if (!d) return d;
+  if (Array.isArray(d)) d = d.length && Array.isArray(d[0]?.kasten) ? { wanden: d } : { wanden: [{ naam: 'Wand 1', kasten: d }] };
+  if (!Array.isArray(d.wanden)) {
+    if (Array.isArray(d.kasten)) d = { ...d, wanden: [{ naam: d.naam || 'Wand 1', kasten: d.kasten, werkblad: d.werkblad, totaal: d.totaal, eiland: d.eiland, achterzijde: d.achterzijde }] };
+    else if (d.wand && Array.isArray(d.wand.kasten)) d = { ...d, wanden: [d.wand] };
+  }
+  return d;
+}
 /** Ontbrekende velden aanvullen, zodat de controlelijst en het maken nooit vastlopen. */
 function schetsSchoon(d) {
   d.opmerkingen = Array.isArray(d.opmerkingen) ? d.opmerkingen.map(String) : [];
@@ -420,6 +451,7 @@ async function schetsVraag(key, payload) {
  */
 async function schetsLezen(base64, key, model, vorige = null) {
   const beeld = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } };
+  schetsLezen.laatsteAntwoord = '';
   const vraagTekst = vorige ? `Lees deze schets. Je eerste lezing was:\n${JSON.stringify({ ...vorige.data, vragen: undefined })}\n\n`
     + `De gebruiker beantwoordde je vragen:\n${vorige.antwoorden.map((a, i) => `${i + 1}. ${a.vraag} → ${a.antwoord}`).join('\n')}\n\n`
     + 'Pas de lezing aan met die antwoorden (ze gaan voor op je eerste gok) en geef de volledige JSON opnieuw in dezelfde vorm. '
@@ -430,22 +462,33 @@ async function schetsLezen(base64, key, model, vorige = null) {
     const body = await schetsVraag(key, { model, max_tokens: 16000, system: SCHETS_PROMPT + SCHETS_VORM,
       messages: [{ role: 'user', content: [beeld, { type: 'text', text: vraagTekst }] }] });
     const text = (body.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('');
-    const data = schetsNormaal(schetsJsonUitTekst(text));
+    schetsLezen.laatsteAntwoord = text;
+    const data = schetsVorm(schetsNormaal(schetsJsonUitTekst(text)));
     if (schetsHeeftKasten(data)) return schetsSchoon(data);
-    fout = body.stop_reason === 'max_tokens' ? 'Het antwoord was te lang (probeer één wand per foto).' : 'Geen kasten gevonden in het antwoord.';
+    fout = body.stop_reason === 'max_tokens' ? 'Eerste poging: het antwoord was te lang.' : `Eerste poging: geen kasten gevonden in het antwoord${text ? '' : ' (leeg antwoord)'}.`;
   } catch (err) {
     if (/API-sleutel|tegoed|overbelast/.test(err.message)) throw err;
-    fout = err.message;
+    fout = `Eerste poging: ${err.message}`;
   }
-  // 2. Nog eens, met het vaste formulier (tool).
-  const body = await schetsVraag(key, { model, max_tokens: 16000, system: SCHETS_PROMPT,
-    tools: [{ name: 'kasten', description: 'De kasten die op de schets staan, per wand.', input_schema: SCHETS_SCHEMA }],
-    tool_choice: { type: 'tool', name: 'kasten' },
-    messages: [{ role: 'user', content: [beeld, { type: 'text', text: `${vraagTekst} Geef de kasten met de tool "kasten".` }] }] });
+  // 2. Nog eens, met het formulier (tool) aangeboden; niet verplicht, want niet elk model aanvaardt een verplichte tool.
+  let body;
+  try {
+    body = await schetsVraag(key, { model, max_tokens: 16000, system: SCHETS_PROMPT + SCHETS_VORM,
+      tools: [{ name: 'kasten', description: 'Geef hiermee de kasten die op de schets staan, per wand.', input_schema: SCHETS_SCHEMA }],
+      tool_choice: { type: 'auto' },
+      messages: [{ role: 'user', content: [beeld, { type: 'text', text: `${vraagTekst} Geef de kasten met de tool "kasten" (of als JSON-blok).` }] }] });
+  } catch (err) {
+    throw new Error(`${fout ?? ''} Tweede poging: ${err.message}`.trim());
+  }
   const tool = (body.content ?? []).find(c => c.type === 'tool_use' && c.name === 'kasten');
-  const data = schetsNormaal(tool?.input);
+  let data = schetsVorm(schetsNormaal(tool?.input));
+  if (!schetsHeeftKasten(data)) {
+    const text2 = (body.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('');
+    if (text2) schetsLezen.laatsteAntwoord = text2;
+    data = schetsVorm(schetsNormaal(schetsJsonUitTekst(text2)));
+  }
   if (schetsHeeftKasten(data)) return schetsSchoon(data);
-  throw new Error(`${fout ?? ''} Ook een tweede poging gaf geen kasten.${body.stop_reason === 'max_tokens' ? ' Het antwoord was te lang: probeer één wand per foto.' : ''}`.trim());
+  throw new Error(`${fout ?? ''} Tweede poging: ook geen kasten.${body.stop_reason === 'max_tokens' ? ' Het antwoord was te lang: probeer één wand per foto.' : ''}`.trim());
 }
 
 // MARK: - Van gelezen schets naar kasten
@@ -757,7 +800,8 @@ function openSketchImport(p, onDone) {
         </div></div>
         ${st.foto ? `<div class="group"><div class="group-body" style="padding:8px"><img src="${st.foto.dataUrl}" style="max-width:100%;border-radius:8px"></div></div>
           <div class="group"><div class="group-body"><button class="row button" type="button" id="sk-go" ${st.bezig ? 'disabled' : ''}>${st.bezig ? 'Bezig met lezen… (even geduld)' : 'Schets lezen'}</button></div></div>` : ''}
-        ${st.fout ? `<div class="group"><div class="group-body"><div class="row"><span class="row-sub" style="color:var(--red, #c00)">${esc(st.fout)}</span></div></div></div>` : ''}`;
+        ${st.fout ? `<div class="group"><div class="group-body"><div class="row"><span class="row-sub" style="color:var(--red, #c00)">${esc(st.fout)}</span></div></div></div>
+          ${schetsLezen.laatsteAntwoord ? `<details class="group"><summary class="group-header" style="cursor:pointer;text-transform:none">Antwoord van Claude bekijken</summary><div class="group-body" style="padding:10px"><pre style="white-space:pre-wrap;font-size:11px;max-height:300px;overflow:auto;margin:0">${esc(schetsLezen.laatsteAntwoord.slice(0, 6000))}</pre></div></details>` : ''}` : ''}`;
       $('#sk-vb', body).addEventListener('click', () => { const d = schetsVoorbeeldPdf(); shareFile(d.blob, d.name); });
       $('#sk-key', body).addEventListener('change', e => schetsSet(SCHETS_KEY, e.target.value.trim()));
       $('#sk-model', body).addEventListener('change', e => schetsSet(SCHETS_MODEL, e.target.value));
