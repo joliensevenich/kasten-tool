@@ -135,6 +135,10 @@ const DEFAULT_SETTINGS = {
   rondRibVanaf: 1200,        // tussenribben pas vanaf deze kasthoogte
   rondStaanderAfstand: 100,  // opstaanders langs de boog om de (hoogstens)
   rondStaanderBreedte: 100,  // opstaander: breedte (18 × deze maat)
+  rondStaanderMin: 80,       // opstaander: nooit smaller dan
+  clamexParallelAchter: 10,  // parallelle Clamex: middenpunt vanaf de achterkant van de zijwand
+  clamexParallelVoor: 20,    // en vanaf de voorkant
+  clamexParallelAfstand: 500, // parallelle Clamex (kast aan kast, plaat ronde kant aan zijwand): ongeveer om de
   rondSponningBreedte: 14,   // sponning in de rechte stukken, top en bodem: breedte (= dikte buigtriplex)
   rondSponningDiepte: 13,    // en diepte (zo ver gaat het buigtriplex erin)
   werkbladHoekVerstek: 12,   // werkbladen in een hoek: vooraan zoveel in verstek (afgeronde voorkant), de rest recht
@@ -417,6 +421,24 @@ function buigKeuze(boog, h, S, voorkeur) {
   const eerst = voorkeur === 'lang' || voorkeur === 'kort' ? voorkeur : auto, ander = eerst === 'lang' ? 'kort' : 'lang';
   const richting = past[eerst] ? eerst : past[ander] ? ander : eerst;
   return { richting, past: past[richting], omgezet: !!voorkeur && voorkeur !== 'auto' && richting !== voorkeur };
+}
+
+/**
+ * Plaats voor een parallelle Clamex in het buitenvlak van een zijwand: de frezing is 14 mm diep in een plaat van 18, dus
+ * niet tegenover een boring aan de binnenkant (rijboring, deuvels, schroeven). Zoekt rond (u, v) in stappen van 16 mm in
+ * de hoogte; geeft de vrije v of null.
+ */
+function clamexParallelVrij(side, u, v, vMin, vMax) {
+  const binnen = side.ops.filter(o => o.face === 'binnen' && o.kind === 'boring');
+  const buiten = side.ops.filter(o => o.face === 'buiten' && (o.kind === 'clamex' || o.kind === 'boring'));
+  for (const dv of [0, 16, -16, 32, -32, 48, -48, 64, -64, 80, -80]) {
+    const vv = v + dv;
+    if (vv < vMin || vv > vMax) continue;
+    if (binnen.some(o => Math.abs(o.u - u) < 22 && Math.abs(o.v - vv) < 45)) continue;
+    if (buiten.some(o => Math.abs(o.u - u) < 60 && Math.abs(o.v - vv) < 70)) continue;
+    return vv;
+  }
+  return null;
 }
 
 function buildCabinet(k, S = DEFAULT_SETTINGS) {
@@ -2079,10 +2101,39 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
       const levels = [0, ...ribYs, H - t];
       const ribParts = parts.filter(x => x.naam === 'Rib ronde kant' && ribYs.includes(x.box.y));
       const levelPart = y => (y === 0 ? bot : y === H - t ? top : ribParts.find(x => Math.abs(x.box.y - y) < 0.5));
+      // Plaat tegen de kast rechtstreeks aan de zijwand: Clamex P-14 als parallelle verbinding (frezing in beide vlakken
+      // die tegen elkaar liggen), in 1 of 2 kolommen over de diepte en rijen om de ±400 mm, weg van top, bodem, ribben
+      // en de sponning vooraan (kolommen op 1/3 en 2/3 van de diepte, weg van de rijboringen).
+      {
+        // Twee rechte lijnen evenwijdig met de voor- en achterkant van de zijwand: middenpunt 10 mm van achter, 20 mm van voor.
+        const za = Math.max(inner.box.z, zBackK) + (S.clamexParallelAchter ?? 10), zb = Math.min(inner.box.z + inner.box.d - S.rondSponningBreedte, zBackK + sd.uLen) - (S.clamexParallelVoor ?? 20);
+        if (zb - za > 20) {
+          const kol = zb - za > 150 ? [za, zb] : [(za + zb) / 2];
+          const vrij = levels.slice(0, -1).map((lv, i) => [lv + t + 80, levels[i + 1] - 80]).filter(([a2, b2]) => b2 - a2 >= 0);
+          let n = 0;
+          for (const [y0, y1] of vrij) {
+            const afst = S.clamexParallelAfstand || 500;
+            const rows = y1 - y0 < afst * 0.6 ? 1 : Math.max(2, Math.round((y1 - y0) / afst) + 1);   // ongeveer om de clamexParallelAfstand
+            const ysR = rows === 1 ? [(y0 + y1) / 2] : Array.from({ length: rows }, (_, i) => y0 + i * (y1 - y0) / (rows - 1));
+            for (const y0r of ysR) for (const zK of kol) {
+              const binnenwaarts = kol.length > 1 && zK === kol[1] ? -1 : 1;
+              let vv = null, z = zK;
+              for (const dz of [0]) { vv = clamexParallelVrij(sd, sideU(zK + dz * binnenwaarts), sideV(y0r), sideV(y0), sideV(y1)); if (vv !== null) { z = zK + dz * binnenwaarts; break; } }
+              if (vv === null) continue;
+              const y = vv - sideV(0);
+              inner.ops.push({ kind: 'clamex', face: 'binnen', u: z - inner.box.z, v: y - inner.box.y, dir: [0, 1], naam: 'Clamex (parallel, in de zijwand)' });
+              sd.ops.push({ kind: 'clamex', face: 'buiten', u: sideU(z), v: sideV(y), dir: [0, 1], naam: 'Clamex (parallel, plaat ronde kant)' });
+              count('Lamello Clamex P-14');
+              n++;
+            }
+          }
+          if (n) warnings.push(`Ronde kant ${rd.kant}: de plaat tegen de kast zit met ${n} Clamex (parallelle verbinding) rechtstreeks aan de zijwand, naast de Clamex van de ronde top en bodem.`);
+        }
+      }
       // Opstaanders langs de bogen (en het rechte stuk vooraan bij een bredere ronde kant), net binnen het buigtriplex,
       // om het op te lijmen en te nieten; tussen bodem, ribben en top, met twee deuvels aan elk uiteinde (+ lijm).
       {
-        const sdp = S.rondStaanderBreedte, hw = t / 2;
+        const sdp = Math.max(S.rondStaanderMin || 80, S.rondStaanderBreedte), hw = t / 2;
         const Ls = xPan - cx, ms = Ls > S.rondStaanderAfstand * 0.6 ? Math.ceil(Ls / S.rondStaanderAfstand) - 1 || 1 : 0;
         const spots = alongArcs(Ri, S.rondStaanderAfstand).map(s => ({ off: 0, ...s }));
         for (let j = 1; j <= ms; j++) {
@@ -2258,20 +2309,17 @@ function buildCabinet(k, S = DEFAULT_SETTINGS) {
               const xw0 = tail ? cx - Rpr : cx - Rpr * 0.98, xw1 = -bt;
               if (xw1 - xw0 > 40) add({ ...mp, naam: 'Plintenbak ronde kant (tegen de muur)', box: { x: Math.min(X(xw0), X(xw1)), y: yb0, z: zBack, w: xw1 - xw0, h: hb, d: bt }, uLen: xw1 - xw0, vLen: hb });
             }
-            const sdp = Math.min(S.rondStaanderBreedte, Rpr * 0.4), hw = bt / 2;
-            for (const { a, ccz, off = 0 } of alongArcs(Rpr, S.rondStaanderAfstand)) {
+            // Opstaanders in de ronde plint: minstens rondStaanderMin breed (kleiner past alleen bij een heel kleine radius).
+            const sdpMin = S.rondStaanderMin || 80, sdp = Math.min(Math.max(sdpMin, S.rondStaanderBreedte), Math.max(sdpMin, Rpr * 0.6), Rpr - 10);
+            if (sdp < sdpMin) warnings.push(`Ronde plint: de radius (${r1(Rpr)} mm) is te klein voor opstaanders van minstens ${sdpMin} mm; er komen geen opstaanders in de ronde plint (het buigtriplex op de plintribben lijmen).`);
+            const hw = bt / 2;
+            for (const { a, ccz, off = 0 } of sdp >= sdpMin ? alongArcs(Rpr, S.rondStaanderAfstand) : []) {
               const { ca, sa, ox, quad } = studQuad(a, ccz, Rpr - sdp, Rpr, hw, off);
               const stp = shaped({ ...mp, naam: 'Opstaander ronde plint', grain: 'v', y: yb0, h: hb }, quad);
               stp.uLen = sdp; stp.vLen = hb;
-              for (const [edge, lv, face] of [['v0', pribs[0], 'boven'], ['v1', pribs[1], 'onder']]) {
-                for (const d of [sdp * 0.25, sdp * 0.75]) {
-                  const pt = [ox + (Rpr - sdp + d) * ca, ccz + (Rpr - sdp + d) * sa];
-                  stp.ops.push({ kind: 'boring', edge, pos: d, dia: S.deuvelDia, diepte: S.deuvelDiepteKant, naam: 'Deuvel' });
-                  lv.ops.push({ kind: 'boring', face, u: X(pt[0]) - lv.box.x, v: pt[1] - lv.box.z, dia: S.deuvelDia, diepte: S.deuvelDiepteVlak, naam: 'Deuvel' });
-                  count(`Deuvel ${S.deuvelDia} × ${S.deuvelLengte}`);
-                }
-              }
+              void ca; void sa; void ox;                       // geen deuvels: de ronde plintbak wordt vastgenageld
             }
+            warnings.push('Ronde plintbak: opstaanders en plintribben vastnagelen en lijmen (geen deuvels).');
           }
         }
         const endP = rr => dd([[0, czF + rr], ...arc(rr), ...(tail ? [[cx - rr, zBack]] : half ? [[0, czB - rr]] : [])]);
@@ -2718,6 +2766,49 @@ function projectParts(project, S, maxLen = 2780) {
     const lx = dx * Math.cos(r) - dz * Math.sin(r), lz = dx * Math.sin(r) + dz * Math.cos(r);
     return Math.abs(lx - Number(a.k.breedte)) < 2 && Math.abs(lz + Number(b.k.diepte) - Number(a.k.diepte)) < 2;
   });
+  // Kasten koppelen: zijwand tegen zijwand met Clamex P-14 als parallelle verbinding, ongeveer om de
+  // clamexParallelAfstand in de hoogte, in 1 of 2 kolommen over de diepte; niet tegenover boringen aan de binnenkant.
+  if (project.koppelClamex !== false) {
+    const afst = S.clamexParallelAfstand || 500;
+    const kopie = (it, p) => { const i = it.parts.indexOf(p); if (i < 0) return p; if (p._koppelKopie) return p; const c = { ...p, ops: p.ops.slice(), _koppelKopie: true }; it.parts[i] = c; return c; };
+    for (const a of ok) {
+      const b = rightOf(a);
+      if (!b) continue;
+      const sA0 = a.parts.find(x => x.rol === 'zijwand' && !x.left), sB0 = b.parts.find(x => x.rol === 'zijwand' && x.left);
+      if (!sA0 || !sB0 || sA0.shape || sB0.shape) continue;            // schuine zijwanden niet
+      const off = Number(a.k.diepte) - Number(b.k.diepte);              // z van kast b in het stelsel van kast a
+      // Twee rechte lijnen evenwijdig met de voor- en achterkant: middenpunt 10 mm van achter en 20 mm van voor
+      // (zo komen ze niet in de rugwandgroef, de rijboringen of de deuvels).
+      const z0 = Math.max(sA0.box.z, sB0.box.z + off) + (S.clamexParallelAchter ?? 10), z1 = Math.min(sA0.box.z + sA0.box.d, sB0.box.z + off + sB0.box.d) - (S.clamexParallelVoor ?? 20);
+      const y0 = Math.max(sA0.box.y, sB0.box.y) + 100, y1 = Math.min(sA0.box.y + sA0.box.h, sB0.box.y + sB0.box.h) - 100;
+      if (z1 - z0 < 40 || y1 - y0 < 40) continue;
+      const sA = kopie(a, sA0), sB = kopie(b, sB0);
+      const kol = z1 - z0 > 150 ? [z0, z1] : [(z0 + z1) / 2];
+      const rows = y1 - y0 < afst * 0.6 ? 1 : Math.max(2, Math.round((y1 - y0) / afst) + 1);
+      const ysR = rows === 1 ? [(y0 + y1) / 2] : Array.from({ length: rows }, (_, i) => y0 + i * (y1 - y0) / (rows - 1));
+      let n = 0;
+      for (const yR of ysR) for (const zK of kol) {
+        // Een plaats die in beide zijwanden vrij is (zo nodig wat naar binnen of in de hoogte verschoven).
+        let y = null, z = zK;
+        const naarBinnen = zK === z0 && kol.length > 1 ? 1 : zK === z1 && kol.length > 1 ? -1 : 1;
+        zoek: for (const dz of [0]) for (const dv of [0, 16, -16, 32, -32, 48, -48, 64, -64]) {
+          const yy = yR + dv, zz = zK + dz;
+          if (yy < y0 || yy > y1) continue;
+          const vA = clamexParallelVrij(sA, zz - sA.box.z, yy - sA.box.y, yy - sA.box.y, yy - sA.box.y), vB = clamexParallelVrij(sB, zz - off - sB.box.z, yy - sB.box.y, yy - sB.box.y, yy - sB.box.y);
+          if (vA !== null && vB !== null) { y = yy; z = zz; break zoek; }
+        }
+        if (y === null) continue;
+        sA.ops.push({ kind: 'clamex', face: 'buiten', u: z - sA.box.z, v: y - sA.box.y, dir: [0, 1], naam: `Clamex (koppeling met ${b.k.code})` });
+        sB.ops.push({ kind: 'clamex', face: 'buiten', u: z - off - sB.box.z, v: y - sB.box.y, dir: [0, 1], naam: `Clamex (koppeling met ${a.k.code})` });
+        n++;
+      }
+      if (n) {
+        const h = a.res.hardware.find(x => x.naam === 'Lamello Clamex P-14');
+        if (h) h.aantal += n; else a.res.hardware.push({ naam: 'Lamello Clamex P-14', aantal: n });
+        a.res.warnings.push(`Gekoppeld aan ${b.k.code} met ${n} Clamex (parallelle verbinding, zijwand tegen zijwand).`);
+      }
+    }
+  }
   const keyOf = p => `${p.rol}|${p.naam.replace(/^Greeplijst [^,]+,/, 'G,')}|${Math.round(p.box.y)}|${Math.round(p.box.h)}|${Math.round(p.box.z)}|${Math.round(p.box.d)}|${p.decor}|${p.dikte}`;
   const kind = p => p.rol === 'plint' || p.rol === 'greeplijst' || p.rol === 'trespa' || p.id === 'paslat-front-boven' || p.id === 'paslat-kast-boven'
     || (p.rol === 'plintbak' && (p.naam === 'Plintenbak voor' || p.naam === 'Plintenbak achter'));   // plintenbak: voor- en achterlat doorlopend

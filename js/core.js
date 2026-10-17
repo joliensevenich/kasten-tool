@@ -138,6 +138,8 @@ function mergeSettings(saved) {
   // Buigtriplex: platen van 2440 × 1220 (opgegeven 17-10-2026; vroeger 2500) en de HPO-naam met de buigrichting.
   if (saved.nest?.buigLengte === 2500) out.nest.buigLengte = 2440;
   if (saved.nest?.hpoBuig === 'BUIGTRIPLEX_{dikte}') out.nest.hpoBuig = 'BUIGTRIPLEX_{richting}_{dikte}';
+  // Opstaanders in de ronde afwerking: minstens 80 mm breed (opgegeven 17-10-2026).
+  if ((saved.rondStaanderBreedte ?? 100) < 80) out.rondStaanderBreedte = 100;
   // Ladebodem en -rug in 18 mm (aan de randen afgefreesd tot 16 mm).
   if (saved.ladeBodemDikte === 16) out.ladeBodemDikte = 18;
   for (const serie of Object.keys(base.blum)) {
